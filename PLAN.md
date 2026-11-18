@@ -20,6 +20,9 @@ En enkel app for byggetilsynet på de to Hagland-nybyggene. Den skal brukes til 
 - Velg skip øverst (Nybygg 1 / Nybygg 2).
 - Stor knapp **«Ta bilde»**. Etterpå kan du skrive et kort notat og eventuelt sted om bord.
   Begge kan hoppes over.
+- Sted angis med fire korte felt: **Seksjon, Spant, Dekk og Rom**. Forslagene bygger på det du har
+  skrevet før, og «Samme som sist» fyller inn forrige sted med ett trykk.
+- **«Lagre og ta neste bilde»** for å gå rundt og dokumentere mange ting raskt.
 - **Notat uten bilde** er også mulig.
 - Liste over dagens registreringer. Trykk på en for å rette eller slette.
 - Bla til tidligere dager.
@@ -34,8 +37,6 @@ OneDrive / Apper / Tilsynsdagbok /
          0912 Maskinrom - sveis spant 42.jpg
          Dagbok Nybygg 1 2026-11-18.docx
    Nybygg 2 / ...
-   Ukesrapporter /
-      Weekly summary 2026 week 47.docx
 ```
 - Bildene lastes opp med full kvalitet så snart det er nett.
 - Word-dagboken for hver dag viser klokkeslett, sted, notat og bilder. Den oppdateres etter
@@ -53,7 +54,8 @@ OneDrive / Apper / Tilsynsdagbok /
   Claude lager et kort sammendrag **på engelsk** med én seksjon per skip:
   hovedaktiviteter og fremdrift, viktige observasjoner, og hva som gjenstår eller må følges opp.
 - Ren tekst med enkle punktlister, som er lett å lime inn i Marine Manager.
-- Teksten kan rettes i appen før **«Kopier»**. Den lagres også i OneDrive.
+- Teksten kan rettes i appen før **«Kopier»**. Det lages ingen egen fil.
+  Det eneste resultatet er teksten som limes inn i ukesrapporten i MM.
 - Reserve uten nett eller AI: ei enkel liste over ukas notater.
 - Krever en egen Anthropic API-nøkkel. Den legges inn under Innstillinger og lagres bare på
   enheten. Kostnaden er under 1 kr per sammendrag.
@@ -66,16 +68,16 @@ sikkerhetskopi til fil (OneDrive er sikkerhetskopien). Dette kan tas inn igjen s
 ## Rekkefølge
 | Steg | Hva | Hvem |
 |---|---|---|
-| 1 | Forenkle appen til registrering (bilde + notat) | Claude |
+| 1 | Forenkle appen til registrering (bilde + notat + sted) ✅ | Claude |
 | 2 | Publisere appen på fast https-adresse (GitHub Pages eller Netlify) | Bruker + Claude |
 | 3 | Registrere appen hos Microsoft (guide følger, ca. 10 min) | Bruker |
 | 4 | OneDrive: innlogging, opplastingskø, mappestruktur | Claude |
 | 5 | Word-dagbok per dag | Claude |
-| 6 | Ukessammendrag med Claude, kopier-knapp og lagring i OneDrive | Claude |
+| 6 | Ukessammendrag med Claude og kopier-knapp | Claude |
 | 7 | Opprette Anthropic-konto og API-nøkkel (guide følger) | Bruker |
 | 8 | Prøve på iPhone i en uke og justere | Bruker + Claude |
 
 ## Åpne spørsmål
-- Eksempel på en tidligere ukesrapport fra Marine Manager, for å treffe stil og lengde.
-- Hvordan angis plassering om bord (blokk, spant, dekk, romnavn)? Bør det finnes faste valg?
-- Er GitHub-repoet privat? Det avgjør om GitHub Pages kan brukes gratis, eller om vi bruker Netlify.
+- Eksempel på en tidligere ukesrapport fra Marine Manager, for å treffe stil og lengde (valgfritt).
+- Repoet er privat i dag. Det gjøres offentlig i steg 2 slik at GitHub Pages kan brukes gratis.
+  Bare koden blir synlig. Bilder og notater ligger aldri i repoet.
