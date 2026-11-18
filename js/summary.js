@@ -8,7 +8,7 @@ const KEY_STORAGE = 'tilsyn-anthropic-key';
 
 // Stilen følger Hagland sine rapporter i Marine Manager. Eksemplene er oppdiktede (ingen ekte navn).
 const WEEK_INSTRUCTIONS = `You help a site supervisor (owner's representative) at a shipyard write the weekly report for ONE newbuilding vessel.
-You receive the supervisor's short field notes for one week, mostly written in Norwegian. Each note has a date, a time and, when given, a subcontractor/company and a location on board (section, frame, deck, room).
+You receive the supervisor's short field notes for one week, written in Norwegian or English. Each note has a date, a time and, when given, a subcontractor/company and a location on board (section, frame, deck, room).
 
 Write the "Description" text of the weekly report in English, to be pasted into Marine Manager.
 
@@ -47,7 +47,7 @@ Rules:
 - Output only the description text, with no title, greeting or closing remarks.`;
 
 const DAY_INSTRUCTIONS = `You help a site supervisor (owner's representative) at a shipyard write the daily report for ONE newbuilding vessel.
-You receive the supervisor's short field notes for one day, mostly written in Norwegian, grouped by subcontractor/company, together with the number of people each company had on board.
+You receive the supervisor's short field notes for one day, written in Norwegian or English, grouped by subcontractor/company, together with the number of people each company had on board.
 
 Write the daily report in English, to be pasted into Marine Manager or an e-mail.
 
@@ -185,28 +185,28 @@ export const promptForChat = (notes, kind = 'week') => `${INSTRUCTIONS[kind]}\n\
 
 function explainError(err, Anthropic) {
   const is = (cls) => cls && err instanceof cls;
-  if (is(Anthropic.AuthenticationError)) return 'API-nøkkelen ble ikke godkjent. Sjekk nøkkelen under Innstillinger.';
-  if (is(Anthropic.PermissionDeniedError)) return 'API-nøkkelen mangler tilgang.';
-  if (is(Anthropic.RateLimitError)) return 'For mange forespørsler akkurat nå. Prøv igjen om et minutt.';
+  if (is(Anthropic.AuthenticationError)) return 'The API key was not accepted. Check the key under Settings.';
+  if (is(Anthropic.PermissionDeniedError)) return 'The API key does not have access.';
+  if (is(Anthropic.RateLimitError)) return 'Too many requests right now. Try again in a minute.';
   if (is(Anthropic.BadRequestError)) {
     return /credit|balance/i.test(err.message)
-      ? 'Kreditten på Anthropic-kontoen er brukt opp. Fyll på under «Billing» på console.anthropic.com.'
-      : `Ugyldig forespørsel: ${err.message}`;
+      ? 'The credit on the Anthropic account is used up. Top up under “Billing” at console.anthropic.com.'
+      : `Invalid request: ${err.message}`;
   }
-  if (is(Anthropic.APIConnectionError)) return 'Får ikke kontakt med Claude. Sjekk nettforbindelsen.';
-  if (is(Anthropic.APIError)) return `Feil fra Claude (${err.status ?? 'ukjent'}). Prøv igjen litt senere.`;
+  if (is(Anthropic.APIConnectionError)) return 'Cannot reach Claude. Check the network connection.';
+  if (is(Anthropic.APIError)) return `Error from Claude (${err.status ?? 'unknown'}). Try again a bit later.`;
   return err?.message || String(err);
 }
 
 export async function summarizeWithClaude(notes, kind = 'week') {
   const apiKey = getApiKey();
-  if (!apiKey) throw new Error('Ingen API-nøkkel. Legg den inn under Innstillinger.');
+  if (!apiKey) throw new Error('No API key. Add one under Settings.');
 
   let Anthropic;
   try {
     ({ default: Anthropic } = await import(SDK_URL));
   } catch {
-    throw new Error('Kunne ikke laste Claude. Krever nettforbindelse.');
+    throw new Error('Could not load Claude. A network connection is required.');
   }
 
   // Nøkkelen er brukerens egen og ligger kun på denne enheten (én bruker, ingen server).
@@ -226,9 +226,9 @@ export async function summarizeWithClaude(notes, kind = 'week') {
   }
 
   if (response.stop_reason === 'refusal') {
-    throw new Error('Claude kunne ikke lage dette sammendraget. Prøv «Kopier til Claude-appen» i stedet.');
+    throw new Error('Claude could not write this report. Try “Copy for Claude app” instead.');
   }
   const text = response.content.filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
-  if (!text) throw new Error('Fikk et tomt svar fra Claude. Prøv igjen.');
+  if (!text) throw new Error('Got an empty answer from Claude. Try again.');
   return text;
 }

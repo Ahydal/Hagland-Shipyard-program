@@ -2,7 +2,7 @@ import * as db from './db.js';
 import * as summary from './summary.js';
 import * as sync from './sync.js';
 
-const APP_VERSION = '2.5.0';
+const APP_VERSION = '3.0.0';
 
 /* ------------------------------------------------------------------ */
 /* Konstanter                                                          */
@@ -10,8 +10,8 @@ const APP_VERSION = '2.5.0';
 
 const DEFAULT_SETTINGS = {
   ships: [
-    { id: 'skip1', name: 'Nybygg 1', hull: '' },
-    { id: 'skip2', name: 'Nybygg 2', hull: '' },
+    { id: 'skip1', name: 'Newbuild 1', hull: '' },
+    { id: 'skip2', name: 'Newbuild 2', hull: '' },
   ],
   activeShip: 'skip1',
   stampPhotos: false,
@@ -21,10 +21,10 @@ const DEFAULT_SETTINGS = {
 
 // Plassering om bord. Forslagene lærer av det du har skrevet før.
 const LOC_FIELDS = [
-  { key: 'section', label: 'Seksjon', ph: 'f.eks. 210', defaults: [] },
-  { key: 'frame', label: 'Spant', ph: 'f.eks. 42–45', defaults: [] },
-  { key: 'deck', label: 'Dekk', ph: 'f.eks. Dekk 2', defaults: ['Tanktopp', 'Dekk 1', 'Dekk 2', 'Dekk 3', 'Hoveddekk', 'Brodekk'] },
-  { key: 'room', label: 'Rom', ph: 'f.eks. Maskinrom', defaults: ['Maskinrom', 'Styrehus', 'Lasterom', 'Pumperom', 'Tavlerom', 'Verksted', 'Messe', 'Bysse', 'Lugar', 'Styremaskinrom'] },
+  { key: 'section', label: 'Section', ph: 'e.g. 210', defaults: [] },
+  { key: 'frame', label: 'Frame', ph: 'e.g. 42–45', defaults: [] },
+  { key: 'deck', label: 'Deck', ph: 'e.g. Deck 2', defaults: ['Tank top', 'Deck 1', 'Deck 2', 'Deck 3', 'Main deck', 'Bridge deck'] },
+  { key: 'room', label: 'Room', ph: 'e.g. Engine room', defaults: ['Engine room', 'Wheelhouse', 'Cargo hold', 'Pump room', 'Switchboard room', 'Workshop', 'Mess room', 'Galley', 'Cabin', 'Steering gear room'] },
 ];
 const emptyLoc = () => ({ section: '', frame: '', deck: '', room: '' });
 
@@ -75,10 +75,10 @@ const today = () => toISODate(new Date());
 const hhmm = (d) => `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 const parseISODate = (s) => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
 const addDays = (s, n) => { const d = parseISODate(s); d.setDate(d.getDate() + n); return toISODate(d); };
-const fmtLong = (s) => parseISODate(s).toLocaleDateString('nb-NO', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+const fmtLong = (s) => parseISODate(s).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 const safeFile = (s) => String(s).replace(/[^\wæøåÆØÅ.-]+/g, '_');
-const fmtNum = (s) => parseISODate(s).toLocaleDateString('nb-NO', { day: '2-digit', month: '2-digit', year: 'numeric' });
+const fmtNum = (s) => parseISODate(s).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
 const isDesktop = () => matchMedia('(min-width: 900px)').matches;
 
 /** Mandag i uka datoen tilhører. */
@@ -91,7 +91,7 @@ function isoWeek(s) {
   return 1 + Math.round(((d - jan4) / 864e5 - 3 + ((jan4.getDay() + 6) % 7)) / 7);
 }
 const weekDays = (start) => Array.from({ length: 7 }, (_, i) => addDays(start, i));
-const DAY_SHORT = ['Man', 'Tir', 'Ons', 'Tor', 'Fre', 'Lør', 'Søn'];
+const DAY_SHORT = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 async function copyText(text) {
   try {
@@ -113,9 +113,9 @@ async function copyText(text) {
 function fmtLoc(loc) {
   if (!loc) return '';
   const p = [];
-  if (loc.section) p.push(`Seksj. ${loc.section}`);
-  if (loc.frame) p.push(`Spant ${loc.frame}`);
-  if (loc.deck) p.push(/^\d+$/.test(loc.deck) ? `Dekk ${loc.deck}` : loc.deck);
+  if (loc.section) p.push(`Sec. ${loc.section}`);
+  if (loc.frame) p.push(`Fr. ${loc.frame}`);
+  if (loc.deck) p.push(/^\d+$/.test(loc.deck) ? `Deck ${loc.deck}` : loc.deck);
   if (loc.room) p.push(loc.room);
   return p.join(' · ');
 }
@@ -221,7 +221,7 @@ function loadImage(file) {
     const url = URL.createObjectURL(file);
     const img = new Image();
     img.onload = () => resolve({ img, url });
-    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Kunne ikke lese bildet')); };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Could not read the image')); };
     img.src = url;
   });
 }
@@ -267,22 +267,22 @@ function renderTopbar() {
   const back = isDesktop() ? state.homeView || 'day' : 'day';
   if (state.view === 'settings') {
     $('#topbar').innerHTML = `
-      <button class="icon-btn" data-action="nav" data-view="${back}" aria-label="Tilbake">${icon('left')}</button>
-      <h1 class="topbar-title">Innstillinger</h1>`;
+      <button class="icon-btn" data-action="nav" data-view="${back}" aria-label="Back">${icon('left')}</button>
+      <h1 class="topbar-title">Settings</h1>`;
     return;
   }
   const tabs = `
-    <div class="topbar-name desktop-only">${icon('ship')}<span>Tilsynsdagbok</span></div>
+    <div class="topbar-name desktop-only">${icon('ship')}<span>Site Diary</span></div>
     <nav class="tabs desktop-only">
-      <button class="${state.view === 'week' ? 'on' : ''}" data-action="nav" data-view="week">${icon('calendar')} Uke</button>
-      <button class="${state.view === 'day' ? 'on' : ''}" data-action="nav" data-view="day">${icon('camera')} Dagbok</button>
-      <button class="${state.view === 'dayreport' ? 'on' : ''}" data-action="nav" data-view="dayreport">${icon('report')} Dagsrapport</button>
+      <button class="${state.view === 'week' ? 'on' : ''}" data-action="nav" data-view="week">${icon('calendar')} Week</button>
+      <button class="${state.view === 'day' ? 'on' : ''}" data-action="nav" data-view="day">${icon('camera')} Diary</button>
+      <button class="${state.view === 'dayreport' ? 'on' : ''}" data-action="nav" data-view="dayreport">${icon('report')} Daily report</button>
     </nav>`;
-  const gear = `<button class="icon-btn" data-action="nav" data-view="settings" aria-label="Innstillinger">${icon('gear')}</button>`;
+  const gear = `<button class="icon-btn" data-action="nav" data-view="settings" aria-label="Settings">${icon('gear')}</button>`;
   if (state.view === 'week' || state.view === 'dayreport') {
     $('#topbar').innerHTML = `
-      <button class="icon-btn mobile-only" data-action="nav" data-view="day" aria-label="Tilbake">${icon('left')}</button>
-      <h1 class="topbar-title mobile-only">${state.view === 'week' ? 'Ukessammendrag' : 'Dagsrapport'}</h1>
+      <button class="icon-btn mobile-only" data-action="nav" data-view="day" aria-label="Back">${icon('left')}</button>
+      <h1 class="topbar-title mobile-only">${state.view === 'week' ? 'Weekly report' : 'Daily report'}</h1>
       ${tabs}
       <span class="spacer"></span>
       ${gear}`;
@@ -297,7 +297,7 @@ function renderTopbar() {
     : `<select class="ship-select" data-change="ship-select">${ships.map((s) =>
         `<option value="${s.id}" ${s.id === ship().id ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select>`;
   $('#topbar').innerHTML = `
-    <button class="icon-btn mobile-only" data-action="nav" data-view="week" aria-label="Ukessammendrag">${icon('calendar')}</button>
+    <button class="icon-btn mobile-only" data-action="nav" data-view="week" aria-label="Weekly report">${icon('calendar')}</button>
     ${tabs}
     ${sel}
     ${gear}`;
@@ -329,9 +329,9 @@ function entryCard(e, { showShip = false } = {}) {
       ${e.company ? `<span class="company-badge">${esc(e.company)}</span>` : ''}
       ${loc ? `<span class="loc">${icon('pin')}${esc(loc)}</span>` : ''}
     </div>
-    ${e.text ? `<p class="entry-text">${esc(e.text)}</p>` : '<p class="entry-text muted">Uten notat</p>'}
+    ${e.text ? `<p class="entry-text">${esc(e.text)}</p>` : '<p class="entry-text muted">No note</p>'}
     ${ids.length ? `<div class="thumbs">${ids.slice(0, 6).map((id, i) =>
-      `<img data-photo="${id}" data-action="view-photo" data-entry="${e.id}" data-index="${i}" alt="Bilde ${i + 1}" loading="lazy">`).join('')}
+      `<img data-photo="${id}" data-action="view-photo" data-entry="${e.id}" data-index="${i}" alt="Photo ${i + 1}" loading="lazy">`).join('')}
       ${ids.length > 6 ? `<span class="more">+${ids.length - 6}</span>` : ''}</div>` : ''}
   </article>`;
 }
@@ -346,40 +346,43 @@ const VIEWS = {
     return `
     <section class="view">
       <div class="daybar">
-        <button class="icon-btn" data-action="day-step" data-step="-1" aria-label="Forrige dag">${icon('left')}</button>
+        <button class="icon-btn" data-action="day-step" data-step="-1" aria-label="Previous day">${icon('left')}</button>
         <label class="daypick">
-          <span class="daypick-label">${isToday ? 'I dag' : 'Tidligere dag'}</span>
+          <span class="daypick-label">${isToday ? 'Today' : 'Earlier day'}</span>
           <span class="daypick-date">${cap(fmtLong(state.date))}</span>
-          <input type="date" value="${state.date}" max="${today()}" data-change="pick-date" aria-label="Velg dato">
+          <input type="date" value="${state.date}" max="${today()}" data-change="pick-date" aria-label="Pick date">
         </label>
-        <button class="icon-btn" data-action="day-step" data-step="1" aria-label="Neste dag" ${isToday ? 'disabled' : ''}>${icon('right')}</button>
+        <button class="icon-btn" data-action="day-step" data-step="1" aria-label="Next day" ${isToday ? 'disabled' : ''}>${icon('right')}</button>
       </div>
-      ${isToday ? '' : `<button class="btn small ghost back-today" data-action="goto-today">${icon('history')} Tilbake til i dag</button>`}
+      ${isToday ? '' : `<button class="btn small ghost back-today" data-action="goto-today">${icon('history')} Back to today</button>`}
 
-      ${!sync.canUseFolder() && state.pending ? `<button class="sendbar" data-action="send-onedrive">${icon('cloud')}<span><b>${state.pending}</b> ${state.pending === 1 ? 'endring' : 'endringer'} ikke sendt til OneDrive</span><b class="sendbar-go">Send</b></button>` : ''}
+      ${!sync.canUseFolder() && state.pending ? `<button class="sendbar" data-action="send-onedrive">${icon('cloud')}<span><b>${state.pending}</b> ${state.pending === 1 ? 'change' : 'changes'} not sent to OneDrive</span><b class="sendbar-go">Send</b></button>` : ''}
 
       <div class="quick">
-        <button class="btn primary big" data-action="quick-photo">${icon('camera')} Ta bilde</button>
-        <button class="btn big" data-action="new-entry">${icon('pen')} Skriv notat</button>
+        <button class="btn primary big" data-action="quick-photo">${icon('camera')} Take photo</button>
+        <button class="btn big" data-action="new-entry">${icon('pen')} Write note</button>
       </div>
 
       ${crewBar(ship(), await getCrew(ship().id, state.date))}
 
       <div class="daystats-row">
-        <p class="muted small daystats">${entries.length ? `${entries.length} ${entries.length === 1 ? 'registrering' : 'registreringer'} · ${nPhotos} ${nPhotos === 1 ? 'bilde' : 'bilder'}` : ''}</p>
-        <button class="btn small ghost" data-action="nav" data-view="dayreport">${icon('report')} Dagsrapport</button>
+        <p class="muted small daystats">${entries.length ? `${entries.length} ${entries.length === 1 ? 'entry' : 'entries'} · ${nPhotos} ${nPhotos === 1 ? 'photo' : 'photos'}` : ''}</p>
+        <span class="daystats-actions">
+          ${sync.canUseFolder() ? '' : `<label class="btn small ghost">${icon('refresh')} Get from PC<input type="file" accept=".json,application/json,text/plain" data-change="import-pc" hidden></label>`}
+          <button class="btn small ghost" data-action="nav" data-view="dayreport">${icon('report')} Daily report</button>
+        </span>
       </div>
 
       <div class="list">
         ${entries.length ? entries.map(entryCard).join('') : `
           <div class="empty">
             ${icon('camera', 'empty-ico')}
-            <p><b>Ingenting registrert ${isToday ? 'i dag' : 'denne dagen'}.</b></p>
-            <p class="muted">Trykk «Ta bilde» når du ser noe, og skriv et par ord om det.</p>
+            <p><b>Nothing recorded ${isToday ? 'today' : 'on this day'}.</b></p>
+            <p class="muted">Tap “Take photo” when you see something, and add a few words.</p>
           </div>`}
       </div>
     </section>
-    <button class="fab" data-action="quick-photo" aria-label="Ta bilde">${icon('camera')}</button>`;
+    <button class="fab" data-action="quick-photo" aria-label="Take photo">${icon('camera')}</button>`;
   },
 
   async week() {
@@ -409,55 +412,55 @@ const VIEWS = {
     const tallyList = (title, rows, prefix = '') => `
       <div><h3>${title}</h3>${rows.length
         ? `<ul class="tally">${rows.map(([v, n]) => `<li><span>${esc(prefix + v)}</span><b>${n}</b></li>`).join('')}</ul>`
-        : '<p class="muted small">Ingen registrert</p>'}</div>`;
+        : '<p class="muted small">None recorded</p>'}</div>`;
 
     return `
     <section class="view">
       <div class="daybar">
-        <button class="icon-btn" data-action="week-step" data-step="-7" aria-label="Forrige uke">${icon('left')}</button>
+        <button class="icon-btn" data-action="week-step" data-step="-7" aria-label="Previous week">${icon('left')}</button>
         <div class="daypick static">
-          <span class="daypick-label">${isThisWeek ? 'Denne uka' : 'Uke'}</span>
-          <span class="daypick-date">Uke ${isoWeek(start)} · ${parseISODate(start).getDate()}.${parseISODate(start).getMonth() + 1}. – ${fmtNum(end)}</span>
+          <span class="daypick-label">${isThisWeek ? 'This week' : 'Week'}</span>
+          <span class="daypick-date">Week ${isoWeek(start)} · ${parseISODate(start).getDate()}/${parseISODate(start).getMonth() + 1} – ${fmtNum(end)}</span>
         </div>
-        <button class="icon-btn" data-action="week-step" data-step="7" aria-label="Neste uke" ${isThisWeek ? 'disabled' : ''}>${icon('right')}</button>
+        <button class="icon-btn" data-action="week-step" data-step="7" aria-label="Next week" ${isThisWeek ? 'disabled' : ''}>${icon('right')}</button>
       </div>
 
       <div class="week-grid">
         <aside class="week-side">
           ${sync.canUseFolder() ? oneDriveCard() : ''}
           <div class="card summary-card">
-            <h2>${icon('sparkle')} Ukesrapport til Marine Manager</h2>
+            <h2>${icon('sparkle')} Weekly report for Marine Manager</h2>
             ${shipChips()}
-            <p class="muted small">På engelsk · ${esc(rsh.name)} · ${rTotal} ${rTotal === 1 ? 'registrering' : 'registreringer'} denne uka</p>
-            <div class="mm-title"><span class="muted small">Tittel</span><b>${esc(mmWeekTitle(rsh, start))}</b>
-              <button class="btn small ghost" data-action="copy-title" data-title="${esc(mmWeekTitle(rsh, start))}" aria-label="Kopier tittel">${icon('copy')}</button></div>
+            <p class="muted small">${esc(rsh.name)} · ${rTotal} ${rTotal === 1 ? 'entry' : 'entries'} this week</p>
+            <div class="mm-title"><span class="muted small">Title</span><b>${esc(mmWeekTitle(rsh, start))}</b>
+              <button class="btn small ghost" data-action="copy-title" data-title="${esc(mmWeekTitle(rsh, start))}" aria-label="Copy title">${icon('copy')}</button></div>
             <div class="row">
-              <button class="btn primary" data-action="ai-summary" data-kind="week" ${state.aiBusy ? 'disabled' : ''}>${icon('sparkle')} ${state.aiBusy ? 'Lager sammendrag …' : 'Lag med AI'}</button>
-              <button class="btn" data-action="copy-for-claude" data-kind="week">${icon('copy')} Kopier til Claude-appen</button>
+              <button class="btn primary" data-action="ai-summary" data-kind="week" ${state.aiBusy ? 'disabled' : ''}>${icon('sparkle')} ${state.aiBusy ? 'Writing …' : 'Write with AI'}</button>
+              <button class="btn" data-action="copy-for-claude" data-kind="week">${icon('copy')} Copy for Claude app</button>
             </div>
-            ${hasKey ? '' : `<p class="muted small">«Lag med AI» krever en API-nøkkel (<a href="#" data-action="nav" data-view="settings">Innstillinger</a>). Uten nøkkel: trykk «Kopier til Claude-appen», lim inn i Claude-appen, og lim svaret inn her.</p>`}
-            <textarea id="summaryText" rows="12" data-input="summary" data-key="summary:${rsh.id}:${start}" placeholder="Teksten til «Description» kommer her. Du kan rette den før du kopierer.">${esc(saved)}</textarea>
-            <button class="btn big primary-outline" data-action="copy-summary">${icon('copy')} Kopier tekst</button>
+            ${hasKey ? '' : `<p class="muted small">“Write with AI” needs an API key (<a href="#" data-action="nav" data-view="settings">Settings</a>). Without a key: tap “Copy for Claude app”, paste it into the Claude app, and paste the answer here.</p>`}
+            <textarea id="summaryText" rows="12" data-input="summary" data-key="summary:${rsh.id}:${start}" placeholder="The “Description” text appears here. You can edit it before copying.">${esc(saved)}</textarea>
+            <button class="btn big primary-outline" data-action="copy-summary">${icon('copy')} Copy text</button>
           </div>
 
           <div class="card desktop-only">
-            <h2>Ukeoversikt</h2>
+            <h2>Week overview</h2>
             <div class="table-wrap"><table class="overview">
               <thead><tr><th></th>${days.map((d, i) => `<th class="${d === today() ? 'today' : ''}">${DAY_SHORT[i]}<small>${parseISODate(d).getDate()}.</small></th>`).join('')}<th>Sum</th></tr></thead>
               <tbody>${data.map((s) => `<tr>
                 <th>${esc(s.ship.name)}</th>
                 ${days.map((d) => { const n = s.entries.filter((e) => e.date === d).length; return `<td class="${n ? '' : 'zero'}">${n ? `<a href="#" data-action="open-day" data-date="${d}" data-ship="${s.ship.id}">${n}</a>` : '–'}</td>`; }).join('')}
-                <td class="sum">${s.entries.length}<small>${s.photos} ${s.photos === 1 ? 'bilde' : 'bilder'}</small></td></tr>`).join('')}</tbody>
+                <td class="sum">${s.entries.length}<small>${s.photos} ${s.photos === 1 ? 'photo' : 'photos'}</small></td></tr>`).join('')}</tbody>
             </table></div>
-            <p class="muted small">Tallene viser registreringer per dag. Klikk for å åpne dagen.</p>
+            <p class="muted small">Entries per day. Click a number to open that day.</p>
           </div>
 
           <div class="card desktop-only">
-            <h2>Mest brukte steder</h2>
+            <h2>Most used locations</h2>
             <div class="tally-grid">
-              ${tallyList('Seksjon', tally('section'), 'Seksj. ')}
-              ${tallyList('Dekk', tally('deck'))}
-              ${tallyList('Rom', tally('room'))}
+              ${tallyList('Section', tally('section'), 'Sec. ')}
+              ${tallyList('Deck', tally('deck'))}
+              ${tallyList('Room', tally('room'))}
             </div>
           </div>
         </aside>
@@ -465,18 +468,18 @@ const VIEWS = {
         <div class="week-main desktop-only">
           <div class="card">
             <div class="feed-head">
-              <h2>Ukas registreringer</h2>
+              <h2>This week's entries</h2>
               <div class="chips">
-                <button class="chip-f ${state.weekShip === 'all' ? 'on' : ''}" data-action="week-ship" data-ship="all">Alle</button>
+                <button class="chip-f ${state.weekShip === 'all' ? 'on' : ''}" data-action="week-ship" data-ship="all">All</button>
                 ${state.settings.ships.map((s) => `<button class="chip-f ${state.weekShip === s.id ? 'on' : ''}" data-action="week-ship" data-ship="${s.id}">${esc(s.name)}</button>`).join('')}
               </div>
             </div>
-            <input type="search" class="feed-search" placeholder="Filtrer på tekst eller sted …" value="${esc(state.weekQuery)}" data-input="week-query">
+            <input type="search" class="feed-search" placeholder="Filter by text or location …" value="${esc(state.weekQuery)}" data-input="week-query">
             <div id="weekFeed"></div>
           </div>
 
           ${photos.length ? `<div class="card">
-            <h2>Ukas bilder <span class="muted small">(${photos.length})</span></h2>
+            <h2>This week's photos <span class="muted small">(${photos.length})</span></h2>
             <div class="gallery">${photos.slice(0, 48).map((p, i) => `
               <img data-photo="${p.id}" data-action="view-photo" data-week="1" data-index="${i}" alt="" loading="lazy" title="${esc(fmtLoc(p.e.location))}">`).join('')}
             </div>
@@ -501,29 +504,29 @@ const VIEWS = {
     return `
     <section class="view">
       <div class="daybar">
-        <button class="icon-btn" data-action="day-step" data-step="-1" aria-label="Forrige dag">${icon('left')}</button>
+        <button class="icon-btn" data-action="day-step" data-step="-1" aria-label="Previous day">${icon('left')}</button>
         <label class="daypick">
-          <span class="daypick-label">${isToday ? 'I dag' : 'Dagsrapport'}</span>
+          <span class="daypick-label">${isToday ? 'Today' : 'Daily report'}</span>
           <span class="daypick-date">${cap(fmtLong(date))}</span>
-          <input type="date" value="${date}" max="${today()}" data-change="pick-date" aria-label="Velg dato">
+          <input type="date" value="${date}" max="${today()}" data-change="pick-date" aria-label="Pick date">
         </label>
-        <button class="icon-btn" data-action="day-step" data-step="1" aria-label="Neste dag" ${isToday ? 'disabled' : ''}>${icon('right')}</button>
+        <button class="icon-btn" data-action="day-step" data-step="1" aria-label="Next day" ${isToday ? 'disabled' : ''}>${icon('right')}</button>
       </div>
 
       <div class="week-grid">
         <aside class="week-side">
           <div class="card summary-card">
-            <h2>${icon('report')} Dagsrapport til Marine Manager</h2>
+            <h2>${icon('report')} Daily report for Marine Manager</h2>
             ${shipChips()}
-            <p class="muted small">På engelsk · ${esc(rsh.name)} · ${nEntries} ${nEntries === 1 ? 'registrering' : 'registreringer'} · gruppert per firma med bemanning</p>
-            ${state.settings.reportName ? '' : '<p class="muted small">Tips: legg inn navn og stilling under Innstillinger → Rapporter, så kommer de med i hilsenen nederst.</p>'}
+            <p class="muted small">${esc(rsh.name)} · ${nEntries} ${nEntries === 1 ? 'entry' : 'entries'} · grouped by company with manpower</p>
+            ${state.settings.reportName ? '' : '<p class="muted small">Tip: add your name and job title under Settings → Reports to include them in the sign-off.</p>'}
             <div class="row">
-              <button class="btn primary" data-action="ai-summary" data-kind="day" ${state.aiBusy ? 'disabled' : ''}>${icon('sparkle')} ${state.aiBusy ? 'Lager rapport …' : 'Lag med AI'}</button>
-              <button class="btn" data-action="copy-for-claude" data-kind="day">${icon('copy')} Kopier til Claude-appen</button>
+              <button class="btn primary" data-action="ai-summary" data-kind="day" ${state.aiBusy ? 'disabled' : ''}>${icon('sparkle')} ${state.aiBusy ? 'Writing …' : 'Write with AI'}</button>
+              <button class="btn" data-action="copy-for-claude" data-kind="day">${icon('copy')} Copy for Claude app</button>
             </div>
-            ${hasKey ? '' : `<p class="muted small">«Lag med AI» krever en API-nøkkel (<a href="#" data-action="nav" data-view="settings">Innstillinger</a>). Uten nøkkel: «Kopier til Claude-appen», lim inn i Claude, og lim svaret inn her.</p>`}
-            <textarea id="summaryText" rows="12" data-input="summary" data-key="dsummary:${rsh.id}:${date}" placeholder="Dagsrapporten kommer her. Du kan rette teksten før du kopierer.">${esc(saved)}</textarea>
-            <button class="btn big primary-outline" data-action="copy-summary">${icon('copy')} Kopier dagsrapport</button>
+            ${hasKey ? '' : `<p class="muted small">“Write with AI” needs an API key (<a href="#" data-action="nav" data-view="settings">Settings</a>). Without a key: tap “Copy for Claude app”, paste it into Claude, and paste the answer here.</p>`}
+            <textarea id="summaryText" rows="12" data-input="summary" data-key="dsummary:${rsh.id}:${date}" placeholder="The daily report appears here. You can edit it before copying.">${esc(saved)}</textarea>
+            <button class="btn big primary-outline" data-action="copy-summary">${icon('copy')} Copy daily report</button>
           </div>
           ${ships.map((x) => crewTable(x.sh, x.crew)).join('')}
         </aside>
@@ -531,7 +534,7 @@ const VIEWS = {
         <div class="week-main desktop-only">
           ${ships.map((x) => `<div class="card">
             <h2>${esc(x.sh.name)} <span class="muted small">(${x.entries.length})</span></h2>
-            ${x.entries.length ? `<div class="list">${x.entries.map((e) => entryCard(e)).join('')}</div>` : '<p class="muted">Ingen registreringer.</p>'}
+            ${x.entries.length ? `<div class="list">${x.entries.map((e) => entryCard(e)).join('')}</div>` : '<p class="muted">No entries.</p>'}
           </div>`).join('')}
         </div>
       </div>
@@ -544,83 +547,83 @@ const VIEWS = {
     if (navigator.storage?.estimate) {
       const est = await navigator.storage.estimate();
       const persisted = navigator.storage.persisted ? await navigator.storage.persisted() : false;
-      storage = `<p>Brukt på denne enheten: <b>${(est.usage / 1048576).toFixed(1)} MB</b>.</p>
-        <p>${persisted ? '✅ Varig lagring er aktivert.' : '⚠️ Varig lagring er ikke bekreftet. Nettleseren kan i verste fall rydde bort data ved lite plass.'}</p>
-        ${persisted ? '' : '<button class="btn" data-action="persist">Be om varig lagring</button>'}`;
+      storage = `<p>Used on this device: <b>${(est.usage / 1048576).toFixed(1)} MB</b>.</p>
+        <p>${persisted ? '✅ Persistent storage is enabled.' : '⚠️ Persistent storage is not confirmed. In the worst case the browser may clear data when space runs low.'}</p>
+        ${persisted ? '' : '<button class="btn" data-action="persist">Request persistent storage</button>'}`;
     }
     const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
     const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
     return `
     <section class="view settings">
       <div class="card">
-        <h2>Skip</h2>
+        <h2>Vessels</h2>
         ${s.ships.map((sh, i) => `
           <div class="row ship-row">
-            <div class="field grow"><label>Navn</label><input value="${esc(sh.name)}" data-ship-field="name" data-i="${i}"></div>
-            <div class="field"><label>Byggenr.</label><input value="${esc(sh.hull)}" data-ship-field="hull" data-i="${i}" placeholder="F.eks. NB 123"></div>
+            <div class="field grow"><label>Name</label><input value="${esc(sh.name)}" data-ship-field="name" data-i="${i}"></div>
+            <div class="field"><label>Hull no.</label><input value="${esc(sh.hull)}" data-ship-field="hull" data-i="${i}" placeholder="e.g. NB 123"></div>
           </div>`).join('')}
       </div>
 
       <div class="card">
-        <h2>Rapporter</h2>
-        <p class="muted">Brukes i hilsenen nederst i dagsrapporten («Kind regards, …»).</p>
+        <h2>Reports</h2>
+        <p class="muted">Used in the sign-off of the daily report (“Kind regards, …”).</p>
         <div class="row">
-          <div class="field grow"><label>Navn</label><input value="${esc(s.reportName || '')}" data-setting="reportName" placeholder="Ditt navn" autocomplete="name"></div>
-          <div class="field"><label>Stilling</label><input value="${esc(s.reportTitle || '')}" data-setting="reportTitle" placeholder="F.eks. Site Supervisor"></div>
+          <div class="field grow"><label>Name</label><input value="${esc(s.reportName || '')}" data-setting="reportName" placeholder="Your name" autocomplete="name"></div>
+          <div class="field"><label>Job title</label><input value="${esc(s.reportTitle || '')}" data-setting="reportTitle" placeholder="e.g. Site Supervisor"></div>
         </div>
       </div>
 
       <div class="card">
-        <h2>Bilder</h2>
-        <label class="check"><input type="checkbox" data-change="stamp" ${s.stampPhotos ? 'checked' : ''}> Stemple skipsnavn, dato og klokkeslett i nye bilder</label>
+        <h2>Photos</h2>
+        <label class="check"><input type="checkbox" data-change="stamp" ${s.stampPhotos ? 'checked' : ''}> Stamp vessel name, date and time on new photos</label>
       </div>
 
       <div class="card">
-        <h2>${icon('sparkle')} AI-sammendrag (valgfritt)</h2>
+        <h2>${icon('sparkle')} AI reports (optional)</h2>
         ${summary.getApiKey()
-          ? `<p>✅ API-nøkkel er lagt inn på denne enheten.</p>
-             <button class="btn danger" data-action="remove-key">${icon('trash')} Fjern nøkkel</button>`
-          : `<p class="muted">Med en egen API-nøkkel lager appen ukessammendraget direkte. Uten nøkkel kan du bruke «Kopier til Claude-appen».</p>
+          ? `<p>✅ An API key is saved on this device.</p>
+             <button class="btn danger" data-action="remove-key">${icon('trash')} Remove key</button>`
+          : `<p class="muted">With your own API key the app writes the reports directly. Without a key, use “Copy for Claude app”.</p>
              <ol class="howto">
-               <li>Gå til <b>console.anthropic.com</b> og opprett en konto.</li>
-               <li>Under <b>Billing</b>: fyll på kreditt med kort, f.eks. 5 USD. Du kan også sette en grense for månedlig forbruk.</li>
-               <li>Under <b>API Keys</b>: trykk «Create Key», kopier nøkkelen og lim den inn her.</li>
+               <li>Go to <b>console.anthropic.com</b> and create an account.</li>
+               <li>Under <b>Billing</b>: add credit with a card, e.g. USD 5. You can also set a monthly spend limit.</li>
+               <li>Under <b>API Keys</b>: click “Create Key”, copy the key and paste it here.</li>
              </ol>
              <div class="row">
-               <div class="field grow"><label for="apiKey">API-nøkkel</label><input id="apiKey" type="password" placeholder="sk-ant-…" autocomplete="off" spellcheck="false"></div>
-               <button class="btn primary" data-action="save-key">${icon('key')} Lagre nøkkel</button>
+               <div class="field grow"><label for="apiKey">API key</label><input id="apiKey" type="password" placeholder="sk-ant-…" autocomplete="off" spellcheck="false"></div>
+               <button class="btn primary" data-action="save-key">${icon('key')} Save key</button>
              </div>`}
-        <p class="muted small">Nøkkelen lagres bare på denne enheten og tas ikke med i sikkerhetskopien. Når du lager et sammendrag, sendes notatteksten (ikke bildene) til Anthropic. Hvert sammendrag koster under 1 kr.</p>
+        <p class="muted small">The key is stored only on this device and is not included in backups. When a report is written, the note text (not the photos) is sent to Anthropic. Each report costs less than USD 0.10.</p>
       </div>
 
       ${sync.canUseFolder() ? oneDriveCard(true) : await iphoneOneDriveCard()}
 
       <div class="card">
-        <h2>Sikkerhetskopi</h2>
-        <p class="muted">Ekstra kopi av alt på denne enheten, som én fil.</p>
+        <h2>Backup</h2>
+        <p class="muted">An extra copy of everything on this device, as one file.</p>
         <div class="row">
-          <button class="btn" data-action="export">${icon('download')} Eksporter</button>
-          <label class="btn">${icon('upload')} Importer<input type="file" accept="application/json,.json" data-change="import" hidden></label>
+          <button class="btn" data-action="export">${icon('download')} Export</button>
+          <label class="btn">${icon('upload')} Import<input type="file" accept="application/json,.json" data-change="import" hidden></label>
         </div>
       </div>
 
       <div class="card">
-        <h2>Lagring</h2>
-        ${storage || '<p class="muted">Ukjent lagringsstatus.</p>'}
+        <h2>Storage</h2>
+        ${storage || '<p class="muted">Unknown storage status.</p>'}
       </div>
 
       <div class="card">
-        <h2>Installer appen</h2>
-        ${standalone ? '<p>✅ Appen kjører som installert app.</p>' : `
-          ${state.installPrompt ? `<button class="btn primary" data-action="install">${icon('download')} Installer på denne enheten</button>` : ''}
+        <h2>Install the app</h2>
+        ${standalone ? '<p>✅ Running as an installed app.</p>' : `
+          ${state.installPrompt ? `<button class="btn primary" data-action="install">${icon('download')} Install on this device</button>` : ''}
           <ul class="howto">
-            <li><b>iPhone:</b> åpne i Safari → Del-knappen → «Legg til på Hjem-skjerm».</li>
-            <li><b>PC (Chrome/Edge):</b> klikk installer-ikonet i adressefeltet.</li>
+            <li><b>iPhone:</b> open in Safari → Share button → “Add to Home Screen”.</li>
+            <li><b>PC (Chrome/Edge):</b> click the install icon in the address bar.</li>
           </ul>
-          ${isIOS ? '<p class="muted">På iPhone må appen åpnes i Safari for å kunne installeres.</p>' : ''}`}
+          ${isIOS ? '<p class="muted">On iPhone the app must be opened in Safari to be installed.</p>' : ''}`}
       </div>
 
-      <p class="muted center small">Tilsynsdagbok v${APP_VERSION}</p>
+      <p class="muted center small">Site Diary v${APP_VERSION}</p>
     </section>`;
   },
 };
@@ -643,15 +646,15 @@ async function knownCompanies() {
   const n = new Map();
   (await db.getAll('meta')).filter((m) => String(m.key).startsWith('crew:'))
     .forEach((c) => crewRows(c).forEach((r) => r.company && n.set(r.company, (n.get(r.company) || 0) + 1)));
-  return [...n.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'nb')).map(([c]) => c);
+  return [...n.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'en')).map(([c]) => c);
 }
 
 function crewBar(sh, crew) {
   const rows = crewRows(crew);
   return `<button class="crewbar" data-action="edit-crew" data-ship="${sh.id}">
     ${icon('users')}
-    <span class="crewbar-text"><b>Bemanning</b>
-      <small>${rows.length ? esc(rows.map((r) => `${r.company || '?'} ${Number(r.count) || 0}`).join(' · ')) : 'Ikke registrert – trykk for å legge inn'}</small></span>
+    <span class="crewbar-text"><b>Manpower</b>
+      <small>${rows.length ? esc(rows.map((r) => `${r.company || '?'} ${Number(r.count) || 0}`).join(' · ')) : 'Not recorded – tap to add'}</small></span>
     <b class="crewbar-total">${rows.length ? crewTotal(crew) : '–'}</b>
   </button>`;
 }
@@ -659,24 +662,24 @@ function crewBar(sh, crew) {
 function crewTable(sh, crew) {
   const rows = crewRows(crew);
   return `<div class="card">
-    <div class="feed-head"><h2>${icon('users')} Bemanning – ${esc(sh.name)}</h2>
-      <button class="btn small" data-action="edit-crew" data-ship="${sh.id}">${icon('pen')} ${rows.length ? 'Endre' : 'Legg inn'}</button></div>
+    <div class="feed-head"><h2>${icon('users')} Manpower – ${esc(sh.name)}</h2>
+      <button class="btn small" data-action="edit-crew" data-ship="${sh.id}">${icon('pen')} ${rows.length ? 'Edit' : 'Add'}</button></div>
     ${rows.length ? `<table class="crew-table">
       ${rows.map((r) => `<tr><td>${esc(r.company || '–')}</td><td>${Number(r.count) || 0}</td></tr>`).join('')}
-      <tr class="sum"><td>Totalt</td><td>${crewTotal(crew)}</td></tr></table>`
-      : '<p class="muted">Ikke registrert.</p>'}
+      <tr class="sum"><td>Total</td><td>${crewTotal(crew)}</td></tr></table>`
+      : '<p class="muted">Not recorded.</p>'}
   </div>`;
 }
 
 const crewRowHtml = (r = { company: '', count: '' }) => `
   <div class="crew-row">
-    <input class="crew-company" list="dl-companies" value="${esc(r.company)}" placeholder="Firma" autocomplete="off">
+    <input class="crew-company" list="dl-companies" value="${esc(r.company)}" placeholder="Company" autocomplete="off">
     <div class="stepper">
-      <button type="button" class="icon-btn" data-action="crew-step" data-step="-1" aria-label="Færre">${icon('minus')}</button>
+      <button type="button" class="icon-btn" data-action="crew-step" data-step="-1" aria-label="Fewer">${icon('minus')}</button>
       <input class="crew-count" type="number" inputmode="numeric" min="0" step="1" value="${r.count === '' ? '' : Number(r.count) || 0}" placeholder="0">
-      <button type="button" class="icon-btn" data-action="crew-step" data-step="1" aria-label="Flere">${icon('plus')}</button>
+      <button type="button" class="icon-btn" data-action="crew-step" data-step="1" aria-label="More">${icon('plus')}</button>
     </div>
-    <button type="button" class="icon-btn crew-del" data-action="crew-del" aria-label="Fjern">${icon('x')}</button>
+    <button type="button" class="icon-btn crew-del" data-action="crew-del" aria-label="Remove">${icon('x')}</button>
   </div>`;
 
 async function openCrewSheet(shipId) {
@@ -690,16 +693,16 @@ async function openCrewSheet(shipId) {
   const dlg = $('#sheet');
   dlg.innerHTML = `
     <div class="sheet crew-sheet">
-      <h2>${icon('users')} Bemanning – ${esc(sh.name)}</h2>
+      <h2>${icon('users')} Manpower – ${esc(sh.name)}</h2>
       <p class="muted">${cap(fmtLong(date))}</p>
-      ${prev && !rows.length ? `<button class="chip" data-action="crew-prev">Samme som ${fmtNum(prev.date)} (${crewTotal(prev)} personer)</button>` : ''}
+      ${prev && !rows.length ? `<button class="chip" data-action="crew-prev">Same as ${fmtNum(prev.date)} (${crewTotal(prev)} people)</button>` : ''}
       <div id="crewRows">${(rows.length ? rows : [{ company: '', count: '' }]).map(crewRowHtml).join('')}</div>
       <datalist id="dl-companies">${companies.map((c) => `<option value="${esc(c)}">`).join('')}</datalist>
-      <button class="btn small" data-action="crew-add">${icon('plus')} Legg til firma</button>
-      <p class="crew-total">Totalt om bord: <b id="crewTotal">0</b></p>
+      <button class="btn small" data-action="crew-add">${icon('plus')} Add company</button>
+      <p class="crew-total">Total on board: <b id="crewTotal">0</b></p>
       <div class="row">
-        <button class="btn ghost" data-action="close-sheet">Avbryt</button>
-        <button class="btn primary grow-btn" data-action="crew-save">Lagre</button>
+        <button class="btn ghost" data-action="close-sheet">Cancel</button>
+        <button class="btn primary grow-btn" data-action="crew-save">Save</button>
       </div>
     </div>`;
   updateCrewTotal();
@@ -721,7 +724,7 @@ async function saveCrew() {
   await db.put('meta', { key: crewKey(ed.shipId, ed.date), shipId: ed.shipId, date: ed.date, rows, updatedAt: Date.now() });
   state.crewEdit = null;
   $('#sheet').close();
-  toast(rows.length ? `Bemanning lagret: ${rows.reduce((n, r) => n + r.count, 0)} personer` : 'Bemanning fjernet');
+  toast(rows.length ? `Manpower saved: ${rows.reduce((n, r) => n + r.count, 0)} people` : 'Manpower removed');
   afterLocalChange();
   render();
 }
@@ -755,7 +758,7 @@ function renderWeekFeed() {
     })
     .sort((a, b) => (b.date + b.time).localeCompare(a.date + a.time));
   if (!list.length) {
-    box.innerHTML = `<p class="muted">${words.length ? 'Ingen treff.' : 'Ingen registreringer denne uka.'}</p>`;
+    box.innerHTML = `<p class="muted">${words.length ? 'No matches.' : 'No entries this week.'}</p>`;
     return;
   }
   let html = '';
@@ -798,22 +801,22 @@ function debounce(fn, ms) {
 async function generateAiSummary(kind = 'week') {
   if (state.aiBusy) return;
   if (!summary.getApiKey()) {
-    toast('Legg inn API-nøkkel først');
+    toast('Add an API key first');
     state.view = 'settings';
     render();
     return;
   }
   const { text, total } = await notesFor(kind);
-  if (!total) { toast(kind === 'day' ? 'Ingenting registrert denne dagen' : 'Ingen registreringer denne uka'); return; }
+  if (!total) { toast(kind === 'day' ? 'Nothing recorded on this day' : 'No entries this week'); return; }
   const box = $('#summaryText');
-  if (box?.value.trim() && !confirm('Erstatte teksten som står i feltet nå?')) return;
+  if (box?.value.trim() && !confirm('Replace the text currently in the field?')) return;
   const key = summaryKey(kind);
   state.aiBusy = true;
   render();
   try {
     const result = await summary.summarizeWithClaude(text, kind);
     await db.put('meta', { key, text: result, updatedAt: Date.now() });
-    toast(kind === 'day' ? 'Dagsrapporten er klar' : 'Sammendraget er klart');
+    toast(kind === 'day' ? 'Daily report ready' : 'Weekly report ready');
   } catch (err) {
     console.error(err);
     alert(err.message);
@@ -830,9 +833,9 @@ async function generateAiSummary(kind = 'week') {
 const fmtLocShort = (loc) => fmtLoc(loc).replace(/\./g, '').replace(/ · /g, ' ');
 
 function fmtWhen(ts) {
-  if (!ts) return 'aldri';
+  if (!ts) return 'never';
   const d = new Date(ts);
-  return d.toDateString() === new Date().toDateString() ? `i dag kl. ${hhmm(d)}` : `${d.toLocaleDateString('nb-NO')} kl. ${hhmm(d)}`;
+  return d.toDateString() === new Date().toDateString() ? `today at ${hhmm(d)}` : `${d.toLocaleDateString('en-GB')} at ${hhmm(d)}`;
 }
 
 /** PC: status og knapper for OneDrive-mappa. */
@@ -840,25 +843,27 @@ function oneDriveCard(inSettings = false) {
   const s = state.sync;
   let body;
   if (!s.root) {
-    body = `<p class="muted">Velg OneDrive-mappa på denne PC-en, f.eks. <b>OneDrive\\Tilsynsdagbok</b> (lag mappa i Utforsker først).
-      Appen legger bilder og Word-dagbøker der, sortert per skip og dag, og henter inn det du sender fra iPhone.</p>
-      <button class="btn primary" data-action="pick-folder">${icon('folder')} Velg OneDrive-mappe</button>`;
+    body = `<p class="muted">Choose the OneDrive folder on this PC, e.g. <b>OneDrive\\Site Diary</b> (create it in File Explorer first).
+      The app saves photos and Word diaries there, sorted by vessel and day, and picks up what you send from the iPhone.
+      It also writes a file the iPhone can fetch to get your PC changes.</p>
+      <button class="btn primary" data-action="pick-folder">${icon('folder')} Choose OneDrive folder</button>`;
   } else if (s.perm !== 'granted') {
     body = `<p>${icon('folder')} <b>${esc(s.root.name)}</b></p>
-      <p class="muted">Nettleseren vil at du bekrefter tilgangen til mappa.</p>
-      <button class="btn primary" data-action="connect-folder">${icon('folder')} Koble til «${esc(s.root.name)}»</button>`;
+      <p class="muted">The browser needs you to confirm access to the folder.</p>
+      <button class="btn primary" data-action="connect-folder">${icon('folder')} Connect “${esc(s.root.name)}”</button>`;
   } else {
-    body = `<p class="sync-line">${icon('folder')} <b>${esc(s.root.name)}</b> · ${s.running ? esc(s.msg || 'Synkroniserer …') : `synkronisert ${fmtWhen(s.lastAt)}`}</p>
+    body = `<p class="sync-line">${icon('folder')} <b>${esc(s.root.name)}</b> · ${s.running ? esc(s.msg || 'Syncing …') : `synced ${fmtWhen(s.lastAt)}`}</p>
       ${s.error ? `<p class="error">${esc(s.error)}</p>` : ''}
       <div class="row">
-        <button class="btn" data-action="sync-now" ${s.running ? 'disabled' : ''}>${icon('refresh')} Synkroniser nå</button>
-        ${inSettings ? '<button class="btn ghost" data-action="pick-folder">Bytt mappe</button>' : ''}
+        <button class="btn" data-action="sync-now" ${s.running ? 'disabled' : ''}>${icon('refresh')} Sync now</button>
+        ${inSettings ? '<button class="btn ghost" data-action="pick-folder">Change folder</button>' : ''}
       </div>`;
   }
   return `<div class="card onedrive-card" id="oneDriveCard" data-settings="${inSettings ? 1 : 0}">
     <h2>${icon('cloud')} OneDrive</h2>${body}
-    ${inSettings ? `<p class="muted small">Fra iPhone: «Send til OneDrive» → «Arkiver i Filer» → <b>${esc(s.root?.name || 'Tilsynsdagbok')} → Innboks</b>.
-      Appen her henter det inn automatisk når den er åpen (sjekker hvert 2. minutt).</p>` : ''}
+    ${inSettings ? `<p class="muted small">From the iPhone: “Send to OneDrive” → “Save to Files” → <b>${esc(s.root?.name || 'Site Diary')} → Inbox</b>.
+      This app picks it up automatically while it is open (checks every 2 minutes).
+      Changes made here are written to <b>From PC</b>, where the iPhone can fetch them with “Get changes from PC”.</p>` : ''}
   </div>`;
 }
 
@@ -871,17 +876,23 @@ function refreshSyncCard() {
 async function iphoneOneDriveCard() {
   const pending = await sync.pendingCount();
   const last = (await db.get('meta', 'lastSent'))?.at;
+  const fromPc = await db.get('meta', 'lastFromPc');
   return `<div class="card">
     <h2>${icon('cloud')} OneDrive</h2>
-    <p>${pending ? `<b>${pending}</b> ${pending === 1 ? 'endring er' : 'endringer er'} ikke sendt.` : '✅ Alt er sendt.'} <span class="muted">Sist sendt ${fmtWhen(last)}.</span></p>
-    <button class="btn primary" data-action="send-onedrive" ${pending ? '' : 'disabled'}>${icon('cloud')} Send til OneDrive</button>
+    <p>${pending ? `<b>${pending}</b> ${pending === 1 ? 'change has' : 'changes have'} not been sent.` : '✅ Everything has been sent.'} <span class="muted">Last sent ${fmtWhen(last)}.</span></p>
+    <button class="btn primary" data-action="send-onedrive" ${pending ? '' : 'disabled'}>${icon('cloud')} Send to OneDrive</button>
     <ol class="howto">
-      <li>Trykk «Send til OneDrive» og så «Åpne del-meny».</li>
-      <li>Velg <b>«Arkiver i Filer»</b> → <b>OneDrive</b> → <b>Tilsynsdagbok</b> → <b>Innboks</b> → «Arkiver». iPhone husker mappa til neste gang.</li>
-      <li>PC-appen henter inn og sorterer alt automatisk når den er åpen.</li>
+      <li>Tap “Send to OneDrive”, then “Open share menu”.</li>
+      <li>Choose <b>“Save to Files”</b> → <b>OneDrive</b> → your app folder → <b>Inbox</b> → “Save”. The iPhone remembers the folder next time.</li>
+      <li>The PC app imports and sorts everything automatically while it is open.</li>
     </ol>
-    <p class="muted small">Krever OneDrive-appen på iPhone, og at mappa er valgt i PC-appen først (da lages Innboks-mappa).</p>
-    <button class="btn small ghost" data-action="resend-all">Send alt på nytt neste gang</button>
+    <p class="muted small">Requires the OneDrive app on the iPhone, and that the folder has been chosen in the PC app first (this creates the Inbox folder). Older setups using “Innboks” still work.</p>
+    <h3>Get changes from PC</h3>
+    <p class="muted">Changes you make in the PC app (entries, manpower, deletions) are saved to <b>From PC</b> in the OneDrive folder.
+      ${fromPc ? `Last fetched ${fmtWhen(fromPc.importedAt)} (PC file from ${fmtWhen(fromPc.at)}).` : 'Not fetched yet.'}</p>
+    <label class="btn">${icon('refresh')} Get changes from PC<input type="file" accept=".json,application/json,text/plain" data-change="import-pc" hidden></label>
+    <p class="muted small">Choose <b>OneDrive</b> → your app folder → <b>From PC</b> → <b>site-diary-from-pc.json</b>.</p>
+    <button class="btn small ghost" data-action="resend-all">Send everything again next time</button>
   </div>`;
 }
 
@@ -889,22 +900,22 @@ let preparedBundle = null;
 
 /** iPhone steg 1: pakk (kan ta litt tid). Steg 2 (eget trykk): åpne del-menyen. */
 async function prepareSend() {
-  toast('Pakker …');
+  toast('Packing …');
   preparedBundle = await sync.buildBundle(state.settings);
-  if (!preparedBundle.count) { toast('Alt er allerede sendt'); return; }
-  const mb = (preparedBundle.blob.size / 1048576).toLocaleString('nb-NO', { maximumFractionDigits: 1 });
+  if (!preparedBundle.count) { toast('Everything has already been sent'); return; }
+  const mb = (preparedBundle.blob.size / 1048576).toLocaleString('en-GB', { maximumFractionDigits: 1 });
   const dlg = $('#sheet');
   dlg.innerHTML = `
     <div class="sheet">
-      <h2>${icon('cloud')} Send til OneDrive</h2>
-      <p><b>${preparedBundle.count}</b> ${preparedBundle.count === 1 ? 'endring' : 'endringer'} er klar til sending (${mb} MB).</p>
+      <h2>${icon('cloud')} Send to OneDrive</h2>
+      <p><b>${preparedBundle.count}</b> ${preparedBundle.count === 1 ? 'change' : 'changes'} ready to send (${mb} MB).</p>
       <ol class="howto">
-        <li>Trykk «Åpne del-meny».</li>
-        <li>Velg <b>«Arkiver i Filer»</b>.</li>
-        <li>Velg <b>OneDrive</b> (den samme som PC-en bruker, f.eks. «OneDrive – Hagland») → <b>Tilsynsdagbok → Innboks</b> og trykk «Arkiver».</li>
+        <li>Tap “Open share menu”.</li>
+        <li>Choose <b>“Save to Files”</b>.</li>
+        <li>Choose <b>OneDrive</b> (the same one the PC uses, e.g. “OneDrive – Hagland”) → your app folder → <b>Inbox</b> and tap “Save”.</li>
       </ol>
-      <button class="btn primary big" data-action="share-bundle">${icon('cloud')} Åpne del-meny</button>
-      <button class="btn ghost" data-action="close-sheet">Avbryt</button>
+      <button class="btn primary big" data-action="share-bundle">${icon('cloud')} Open share menu</button>
+      <button class="btn ghost" data-action="close-sheet">Cancel</button>
     </div>`;
   if (!dlg.open) dlg.showModal();
 }
@@ -916,11 +927,11 @@ async function shareBundle() {
     await sync.markSent(preparedBundle);
     preparedBundle = null;
     $('#sheet').close();
-    toast('Sendt til OneDrive');
+    toast('Sent to OneDrive');
     render();
   } catch (err) {
     console.error(err);
-    alert(`Deling mislyktes: ${err.message}`);
+    alert(`Sharing failed: ${err.message}`);
   }
 }
 
@@ -930,7 +941,7 @@ async function runSync({ quiet = false } = {}) {
   if (!s.root || s.perm !== 'granted' || s.running) return;
   s.running = true;
   s.error = '';
-  s.msg = 'Synkroniserer …';
+  s.msg = 'Syncing …';
   refreshSyncCard();
   try {
     const shipsBefore = JSON.stringify(state.settings.ships);
@@ -941,10 +952,10 @@ async function runSync({ quiet = false } = {}) {
     if (JSON.stringify(state.settings.ships) !== shipsBefore) await saveSettings();
     s.lastAt = Date.now();
     if (res.imported) {
-      toast(`Hentet ${res.imported} ${res.imported === 1 ? 'sending' : 'sendinger'} fra iPhone`);
+      toast(`Imported ${res.imported} ${res.imported === 1 ? 'package' : 'packages'} from iPhone`);
       if (!editorEl().open && !document.activeElement?.matches('textarea, input')) render();
     } else if (!quiet) {
-      toast(res.days ? `Oppdaterte ${res.days} ${res.days === 1 ? 'dag' : 'dager'} i OneDrive` : 'Alt er oppdatert');
+      toast(res.days ? `Updated ${res.days} ${res.days === 1 ? 'day' : 'days'} in OneDrive` : 'Everything is up to date');
     }
   } catch (err) {
     console.error(err);
@@ -985,7 +996,7 @@ async function locationHints(shipId = ship().id) {
   LOC_FIELDS.forEach((f) => {
     const set = new Set(all.map((e) => e.location?.[f.key]).filter(Boolean));
     f.defaults.forEach((d) => set.add(d));
-    hints[f.key] = [...set].sort((a, b) => a.localeCompare(b, 'nb', { numeric: true }));
+    hints[f.key] = [...set].sort((a, b) => a.localeCompare(b, 'en', { numeric: true }));
   });
   const last = all.filter((e) => hasLoc(e.location))
     .sort((a, b) => (b.date + b.time).localeCompare(a.date + a.time) || (b.createdAt || 0) - (a.createdAt || 0))[0];
@@ -1034,33 +1045,33 @@ function renderEditor({ hints, last, companies }) {
   editorEl().innerHTML = `
   <form class="editor" data-editor onsubmit="return false">
     <header class="ed-head">
-      <button type="button" class="btn ghost" data-action="close-editor">Avbryt</button>
-      <h2>${d.isNew ? 'Ny registrering' : 'Rediger'}</h2>
-      <button type="button" class="btn primary" data-action="save-entry">Lagre</button>
+      <button type="button" class="btn ghost" data-action="close-editor">Cancel</button>
+      <h2>${d.isNew ? 'New entry' : 'Edit entry'}</h2>
+      <button type="button" class="btn primary" data-action="save-entry">Save</button>
     </header>
     <div class="ed-body">
       <div class="ed-photos" id="edPhotos"></div>
       <div class="row photo-btns">
-        <label class="btn">${icon('camera')} Ta bilde<input type="file" accept="image/*" capture="environment" data-change="add-photos" hidden></label>
-        <label class="btn">${icon('image')} Fra galleri<input type="file" accept="image/*" multiple data-change="add-photos" hidden></label>
+        <label class="btn">${icon('camera')} Take photo<input type="file" accept="image/*" capture="environment" data-change="add-photos" hidden></label>
+        <label class="btn">${icon('image')} From library<input type="file" accept="image/*" multiple data-change="add-photos" hidden></label>
       </div>
-      <p class="muted small desktop-hint">Tips: dra bilder inn hit, eller lim inn med Ctrl+V.</p>
+      <p class="muted small desktop-hint">Tip: drag photos here, or paste with Ctrl+V.</p>
 
       <div class="field">
-        <label for="f-text">Notat</label>
-        <textarea id="f-text" name="text" rows="4" placeholder="Hva skjer? F.eks. «Montering av hovedmotor pågår. Fundament godkjent.»">${esc(e.text)}</textarea>
+        <label for="f-text">Note</label>
+        <textarea id="f-text" name="text" rows="4" placeholder="What is happening? e.g. “Main engine installation in progress. Foundation accepted.”">${esc(e.text)}</textarea>
       </div>
 
       <div class="field">
-        <label for="f-company">Firma / underleverandør <span class="muted">(valgfritt)</span></label>
+        <label for="f-company">Company / subcontractor <span class="muted">(optional)</span></label>
         ${companies.chips.length ? `<div class="chips company-chips">${companies.chips.map((c) => `<button type="button" class="chip-f ${c === e.company ? 'on' : ''}" data-action="pick-company" data-company="${esc(c)}">${esc(c)}</button>`).join('')}</div>` : ''}
-        <input id="f-company" name="company" value="${esc(e.company)}" list="dl-company" placeholder="Hvem gjelder notatet?" autocomplete="off">
+        <input id="f-company" name="company" value="${esc(e.company)}" list="dl-company" placeholder="Who does this note concern?" autocomplete="off">
         <datalist id="dl-company">${companies.all.map((c) => `<option value="${esc(c)}">`).join('')}</datalist>
       </div>
 
       <fieldset class="locbox">
-        <legend>${icon('pin')} Sted om bord</legend>
-        ${showLast ? `<button type="button" class="chip last-loc" data-action="use-last-loc">Samme som sist: ${esc(fmtLoc(last))}</button>` : ''}
+        <legend>${icon('pin')} Location on board</legend>
+        ${showLast ? `<button type="button" class="chip last-loc" data-action="use-last-loc">Same as last: ${esc(fmtLoc(last))}</button>` : ''}
         <div class="loc-grid">
           ${LOC_FIELDS.map((f) => `
             <div class="field">
@@ -1072,18 +1083,18 @@ function renderEditor({ hints, last, companies }) {
       </fieldset>
 
       <div class="row">
-        <div class="field"><label for="f-ship">Skip</label>
+        <div class="field"><label for="f-ship">Vessel</label>
           <select id="f-ship" name="shipId">${state.settings.ships.map((s) => `<option value="${s.id}" ${s.id === e.shipId ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select></div>
-        <div class="field"><label for="f-date">Dato</label><input id="f-date" type="date" name="date" value="${e.date}"></div>
-        <div class="field"><label for="f-time">Klokkeslett</label><input id="f-time" type="time" name="time" value="${e.time}"></div>
+        <div class="field"><label for="f-date">Date</label><input id="f-date" type="date" name="date" value="${e.date}"></div>
+        <div class="field"><label for="f-time">Time</label><input id="f-time" type="time" name="time" value="${e.time}"></div>
       </div>
 
       <div class="ed-footer">
-        <button type="button" class="btn big primary-outline" data-action="save-and-photo">${icon('camera')} Lagre og ta neste bilde</button>
-        ${d.isNew ? '' : `<button type="button" class="btn danger" data-action="delete-entry">${icon('trash')} Slett</button>`}
+        <button type="button" class="btn big primary-outline" data-action="save-and-photo">${icon('camera')} Save and take next photo</button>
+        ${d.isNew ? '' : `<button type="button" class="btn danger" data-action="delete-entry">${icon('trash')} Delete</button>`}
       </div>
     </div>
-    <div class="drop-hint">Slipp bildene her</div>
+    <div class="drop-hint">Drop photos here</div>
   </form>`;
   renderEditorPhotos();
 }
@@ -1095,7 +1106,7 @@ function renderEditorPhotos() {
   box.innerHTML = d.photos.map((p, i) => `
     <div class="ed-photo">
       <img data-photo="${p.id}" data-action="view-photo" data-draft="1" data-index="${i}" alt="">
-      <button type="button" class="ed-photo-x" data-action="remove-photo" data-id="${p.id}" aria-label="Fjern bilde">${icon('x')}</button>
+      <button type="button" class="ed-photo-x" data-action="remove-photo" data-id="${p.id}" aria-label="Remove photo">${icon('x')}</button>
     </div>`).join('');
   box.hidden = d.photos.length === 0;
   hydrateThumbs(box);
@@ -1130,17 +1141,18 @@ async function addFilesToDraft(files) {
   if (!d) return;
   const imgs = [...files].filter((f) => f.type.startsWith('image/') || /\.(jpe?g|png|heic|heif|webp|gif)$/i.test(f.name));
   if (!imgs.length) return;
-  toast(imgs.length > 1 ? `Behandler ${imgs.length} bilder …` : 'Behandler bilde …');
+  toast(imgs.length > 1 ? `Processing ${imgs.length} photos …` : 'Processing photo …');
   collectDraft();
   for (const file of imgs) {
     try {
       const when = new Date(file.lastModified || Date.now());
       const stamp = state.settings.stampPhotos
-        ? `${ship().name} · ${when.toLocaleDateString('nb-NO')} ${hhmm(when)}` : null;
+        ? `${ship().name} · ${when.toLocaleDateString('en-GB')} ${hhmm(when)}` : null;
       const { blob, thumb } = await processImage(file, stamp);
       const rec = {
         id: uid(), entryId: d.entry.id, shipId: d.entry.shipId, date: d.entry.date,
         blob, thumb, name: file.name, createdAt: Date.now(),
+        origin: sync.canUseFolder() ? 'pc' : 'phone', // bilder fra PC tas med til iPhone
       };
       // Lagres med en gang, så bildet ikke går tapt om iPhone lukker appen mens kameraet er åpent.
       await db.put('photos', rec);
@@ -1148,12 +1160,12 @@ async function addFilesToDraft(files) {
       d.added.push(rec.id);
     } catch (err) {
       console.error(err);
-      toast(`Kunne ikke lese ${file.name}`);
+      toast(`Could not read ${file.name}`);
     }
   }
   saveDraftLocal();
   renderEditorPhotos();
-  toast(imgs.length > 1 ? `${imgs.length} bilder lagt til` : 'Bilde lagt til');
+  toast(imgs.length > 1 ? `${imgs.length} photos added` : 'Photo added');
 }
 
 async function saveEntry({ quiet = false } = {}) {
@@ -1162,7 +1174,7 @@ async function saveEntry({ quiet = false } = {}) {
   collectDraft();
   const e = d.entry;
   if (!e.text.trim() && d.photos.length === 0) {
-    toast('Skriv et notat eller ta et bilde');
+    toast('Write a note or take a photo');
     return false;
   }
   e.photoIds = d.photos.map((p) => p.id);
@@ -1175,8 +1187,8 @@ async function saveEntry({ quiet = false } = {}) {
   editorEl().close();
   if (state.view === 'day' && e.date !== state.date) state.date = e.date;
   const moved = !d.isNew && e.shipId !== d.origShipId;
-  if (moved) toast(`Flyttet til ${state.settings.ships.find((s) => s.id === e.shipId)?.name || 'annet skip'}`);
-  else if (!quiet) toast('Lagret');
+  if (moved) toast(`Moved to ${state.settings.ships.find((s) => s.id === e.shipId)?.name || 'another vessel'}`);
+  else if (!quiet) toast('Saved');
   requestPersist();
   afterLocalChange();
   render();
@@ -1196,7 +1208,7 @@ async function discardDraft() {
 
 async function closeEditor() {
   const d = state.draft;
-  if (d?.dirty && !confirm('Forkaste denne registreringen/endringene?')) return;
+  if (d?.dirty && !confirm('Discard this entry/changes?')) return;
   await discardDraft();
 }
 
@@ -1220,17 +1232,17 @@ async function showLightboxImage() {
   if (lightboxUrl) URL.revokeObjectURL(lightboxUrl);
   lightboxUrl = URL.createObjectURL(p.blob);
   const caption = e
-    ? [`kl. ${esc(e.time)}`, esc(fmtLoc(e.location)), esc((e.text || '').split('\n')[0].slice(0, 80))].filter(Boolean).join(' · ')
-    : 'Nytt bilde (ikke lagret ennå)';
+    ? [`${esc(e.time)}`, esc(fmtLoc(e.location)), esc((e.text || '').split('\n')[0].slice(0, 80))].filter(Boolean).join(' · ')
+    : 'New photo (not saved yet)';
   $('#lightbox').innerHTML = `
     <div class="lb">
       <img src="${lightboxUrl}" alt="">
       <div class="lb-bar">
-        <button class="icon-btn" data-action="lb-step" data-step="-1" ${index === 0 ? 'disabled' : ''} aria-label="Forrige">${icon('left')}</button>
+        <button class="icon-btn" data-action="lb-step" data-step="-1" ${index === 0 ? 'disabled' : ''} aria-label="Previous">${icon('left')}</button>
         <div class="lb-cap">${caption}<small>${index + 1} / ${ids.length}</small></div>
-        <button class="icon-btn" data-action="lb-download" aria-label="Last ned">${icon('download')}</button>
-        <button class="icon-btn" data-action="lb-step" data-step="1" ${index === ids.length - 1 ? 'disabled' : ''} aria-label="Neste">${icon('right')}</button>
-        <button class="icon-btn" data-action="lb-close" aria-label="Lukk">${icon('x')}</button>
+        <button class="icon-btn" data-action="lb-download" aria-label="Download">${icon('download')}</button>
+        <button class="icon-btn" data-action="lb-step" data-step="1" ${index === ids.length - 1 ? 'disabled' : ''} aria-label="Next">${icon('right')}</button>
+        <button class="icon-btn" data-action="lb-close" aria-label="Close">${icon('x')}</button>
       </div>
     </div>`;
 }
@@ -1260,7 +1272,7 @@ const b64ToBlob = (b64, type = 'image/jpeg') => {
 };
 
 async function exportBackup() {
-  toast('Lager sikkerhetskopi …');
+  toast('Creating backup …');
   const [meta, entries, photoKeys] = await Promise.all([db.getAll('meta'), db.getAll('entries'), db.getAllKeys('photos')]);
   const parts = [`{"app":"tilsynsdagbok","version":2,"exportedAt":${JSON.stringify(new Date().toISOString())},`,
     `"meta":${JSON.stringify(meta)},"entries":${JSON.stringify(entries)},"photos":[`];
@@ -1279,15 +1291,15 @@ async function exportBackup() {
 
 async function importBackup(file) {
   let data;
-  try { data = JSON.parse(await file.text()); } catch { toast('Ugyldig fil'); return; }
-  if (data?.app !== 'tilsynsdagbok') { toast('Filen er ikke en sikkerhetskopi fra Tilsynsdagbok'); return; }
-  if (!confirm(`Importere ${data.entries?.length || 0} registreringer og ${data.photos?.length || 0} bilder?\nNyeste versjon av hver registrering beholdes.`)) return;
+  try { data = JSON.parse(await file.text()); } catch { toast('Invalid file'); return; }
+  if (data?.app !== 'tilsynsdagbok') { toast('This file is not a Site Diary file'); return; }
+  if (!confirm(`Import ${data.entries?.length || 0} entries and ${data.photos?.length || 0} photos?\nThe newest version of each entry is kept.`)) return;
   if (!data.settings) data.settings = (data.meta || []).find((m) => m.key === 'settings')?.value;
   await sync.applyBundle(data, state.settings);
   await saveSettings();
   thumbUrls.forEach((u) => URL.revokeObjectURL(u));
   thumbUrls.clear();
-  toast('Import fullført');
+  toast('Import complete');
   render();
 }
 
@@ -1329,7 +1341,7 @@ const ACTIONS = {
   'send-onedrive': () => prepareSend(),
   'edit-crew': (el) => openCrewSheet(el.dataset.ship),
   'report-ship': (el) => { state.reportShip = el.dataset.ship; render(); },
-  'copy-title': async (el) => { toast(await copyText(el.dataset.title) ? 'Tittel kopiert' : 'Kunne ikke kopiere'); },
+  'copy-title': async (el) => { toast(await copyText(el.dataset.title) ? 'Title copied' : 'Could not copy'); },
   'pick-company': (el) => {
     const input = $('#f-company');
     const same = input.value === el.dataset.company;
@@ -1362,7 +1374,7 @@ const ACTIONS = {
   'share-bundle': () => shareBundle(),
   'close-sheet': () => { preparedBundle = null; $('#sheet').close(); },
   'resend-all': async () => {
-    if (!confirm('Merke alle registreringer som ikke sendt? Neste sending tar da med alt (PC-en hopper over det den allerede har).')) return;
+    if (!confirm('Mark all entries as not sent? The next send will then include everything (the PC skips what it already has).')) return;
     const all = await db.getAll('entries');
     await db.putMany('entries', all.map(({ sentAt, ...e }) => e));
     render();
@@ -1374,7 +1386,7 @@ const ACTIONS = {
       refreshSyncCard();
       runSync();
     } catch (err) {
-      if (err.name !== 'AbortError') alert(`Kunne ikke bruke mappa: ${err.message}`);
+      if (err.name !== 'AbortError') alert(`Could not use the folder: ${err.message}`);
     }
   },
   'connect-folder': async () => {
@@ -1386,28 +1398,28 @@ const ACTIONS = {
   'copy-for-claude': async (el) => {
     const kind = el.dataset.kind || 'week';
     const { text, total } = await notesFor(kind);
-    if (!total) { toast(kind === 'day' ? 'Ingenting registrert denne dagen' : 'Ingen registreringer denne uka'); return; }
+    if (!total) { toast(kind === 'day' ? 'Nothing recorded on this day' : 'No entries this week'); return; }
     if (await copyText(summary.promptForChat(text, kind))) {
-      alert('Notatene er kopiert.\n\n1. Åpne Claude-appen og lim inn i en ny samtale.\n2. Kopier svaret fra Claude.\n3. Lim det inn i sammendragsfeltet her (eller rett i Marine Manager).');
+      alert('The notes have been copied.\n\n1. Open the Claude app and paste into a new conversation.\n2. Copy the answer from Claude.\n3. Paste it into the text field here (or straight into Marine Manager).');
     } else {
-      toast('Kunne ikke kopiere');
+      toast('Could not copy');
     }
   },
   'copy-summary': async () => {
     const t = $('#summaryText')?.value.trim();
-    if (!t) { toast('Sammendraget er tomt'); return; }
-    toast(await copyText(t) ? 'Kopiert – lim inn i Marine Manager' : 'Kunne ikke kopiere');
+    if (!t) { toast('The text is empty'); return; }
+    toast(await copyText(t) ? 'Copied – paste into Marine Manager' : 'Could not copy');
   },
   'save-key': () => {
     const v = $('#apiKey')?.value.trim();
-    if (!v) { toast('Lim inn nøkkelen først'); return; }
-    if (!v.startsWith('sk-ant-')) { toast('Nøkkelen skal starte med «sk-ant-»'); return; }
+    if (!v) { toast('Paste the key first'); return; }
+    if (!v.startsWith('sk-ant-')) { toast('The key should start with “sk-ant-”'); return; }
     summary.setApiKey(v);
-    toast('Nøkkel lagret');
+    toast('Key saved');
     render();
   },
   'remove-key': () => {
-    if (!confirm('Fjerne API-nøkkelen fra denne enheten?')) return;
+    if (!confirm('Remove the API key from this device?')) return;
     summary.setApiKey('');
     render();
   },
@@ -1419,9 +1431,9 @@ const ACTIONS = {
     // Kameraet må åpnes direkte i trykket (krav i Safari). Lagringen skjer i mellomtiden.
     const d = state.draft;
     collectDraft();
-    if (!d.entry.text.trim() && d.photos.length === 0) { toast('Skriv et notat eller ta et bilde'); return; }
+    if (!d.entry.text.trim() && d.photos.length === 0) { toast('Write a note or take a photo'); return; }
     openCamera();
-    if (await saveEntry({ quiet: true })) toast('Lagret – ta neste bilde');
+    if (await saveEntry({ quiet: true })) toast('Saved – take the next photo');
   },
   'close-editor': () => closeEditor(),
   'use-last-loc': (el) => {
@@ -1445,15 +1457,16 @@ const ACTIONS = {
     renderEditorPhotos();
   },
   'delete-entry': async () => {
-    if (!confirm('Slette registreringen og bildene i den? Dette kan ikke angres.')) return;
+    if (!confirm('Delete this entry and its photos? This cannot be undone.')) return;
     const d = state.draft;
-    await sync.addTombstone(await db.get('entries', d.entry.id));
+    const gone = await db.get('entries', d.entry.id);
+    if (sync.canUseFolder()) await sync.addPcTombstone(gone); else await sync.addTombstone(gone);
     await db.deleteEntry(d.entry.id);
     d.photos.forEach((p) => forgetThumb(p.id));
     clearDraftLocal();
     state.draft = null;
     editorEl().close();
-    toast('Slettet');
+    toast('Deleted');
     afterLocalChange();
     render();
   },
@@ -1489,8 +1502,21 @@ const CHANGES = {
   'pick-date': (el) => { if (el.value) { state.date = el.value > today() ? today() : el.value; render(); } },
   'ship-select': async (el) => { state.settings.activeShip = el.value; await saveSettings(); render(); },
   'add-photos': async (el) => { const files = [...el.files]; el.value = ''; await addFilesToDraft(files); },
-  stamp: async (el) => { state.settings.stampPhotos = el.checked; await saveSettings(); toast('Lagret'); },
+  stamp: async (el) => { state.settings.stampPhotos = el.checked; await saveSettings(); toast('Saved'); },
   import: async (el) => { const f = el.files[0]; el.value = ''; if (f) await importBackup(f); },
+  'import-pc': async (el) => {
+    const f = el.files[0];
+    el.value = '';
+    if (!f) return;
+    try {
+      const { changed } = await sync.importFromPc(f, state.settings);
+      await saveSettings();
+      toast(changed ? `${changed} ${changed === 1 ? 'change' : 'changes'} from PC` : 'Already up to date');
+      render();
+    } catch (err) {
+      alert(err.message);
+    }
+  },
 };
 
 function bindEvents() {
@@ -1515,12 +1541,12 @@ function bindEvents() {
     if (el.dataset.change && CHANGES[el.dataset.change]) CHANGES[el.dataset.change](el);
     if (el.dataset.setting) {
       state.settings[el.dataset.setting] = el.value.trim();
-      saveSettings().then(() => toast('Lagret'));
+      saveSettings().then(() => toast('Saved'));
     }
     if (el.dataset.shipField) {
       state.settings.ships[Number(el.dataset.i)][el.dataset.shipField] = el.value.trim();
       state.settings.shipsUpdatedAt = Date.now();
-      saveSettings().then(() => toast('Lagret'));
+      saveSettings().then(() => toast('Saved'));
     }
   });
 
@@ -1602,7 +1628,7 @@ async function init() {
     const existing = draft.isNew ? null : await db.get('entries', draft.entry.id);
     renderTopbar();
     await openEditor(existing, { restore: draft });
-    toast('Ulagret registrering ble gjenopprettet');
+    toast('An unsaved entry was restored');
   }
 
   initSync();
@@ -1617,5 +1643,5 @@ async function init() {
 
 init().catch((err) => {
   console.error(err);
-  $('#main').innerHTML = `<div class="empty"><p><b>Noe gikk galt ved oppstart.</b></p><p class="muted">${esc(err.message)}</p></div>`;
+  $('#main').innerHTML = `<div class="empty"><p><b>Something went wrong at startup.</b></p><p class="muted">${esc(err.message)}</p></div>`;
 });
