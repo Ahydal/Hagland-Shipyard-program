@@ -2,7 +2,7 @@ import * as db from './db.js';
 import * as summary from './summary.js';
 import * as sync from './sync.js';
 
-const APP_VERSION = '2.4.0';
+const APP_VERSION = '2.5.0';
 
 /* ------------------------------------------------------------------ */
 /* Konstanter                                                          */
@@ -15,6 +15,8 @@ const DEFAULT_SETTINGS = {
   ],
   activeShip: 'skip1',
   stampPhotos: false,
+  reportName: '',
+  reportTitle: '',
 };
 
 // Plassering om bord. Forslagene lærer av det du har skrevet før.
@@ -132,6 +134,7 @@ function normalize(e) {
   }
   e.text = e.text || '';
   e.photoIds = e.photoIds || [];
+  e.company = e.company || '';
   return e;
 }
 
@@ -175,6 +178,10 @@ const state = {
 };
 
 const ship = () => state.settings.ships.find((s) => s.id === state.settings.activeShip) || state.settings.ships[0];
+/** Skipet rapportene gjelder (følger valgt skip i dagboken hvis ikke annet er valgt). */
+const reportShip = () => state.settings.ships.find((s) => s.id === state.reportShip) || ship();
+const shipChips = () => `<div class="chips">${state.settings.ships.map((s) => `<button class="chip-f ${s.id === reportShip().id ? 'on' : ''}" data-action="report-ship" data-ship="${s.id}">${esc(s.name)}</button>`).join('')}</div>`;
+const mmWeekTitle = (sh, start) => `${sh.name}. Week ${isoWeek(start)} (${summary.mmDate(start)} - ${summary.mmDate(addDays(start, 6))})`;
 
 async function loadSettings() {
   const rec = await db.get('meta', 'settings');
@@ -319,6 +326,7 @@ function entryCard(e, { showShip = false } = {}) {
     <div class="entry-top">
       <time>${esc(e.time || '')}</time>
       ${sh ? `<span class="ship-badge">${esc(sh.name)}</span>` : ''}
+      ${e.company ? `<span class="company-badge">${esc(e.company)}</span>` : ''}
       ${loc ? `<span class="loc">${icon('pin')}${esc(loc)}</span>` : ''}
     </div>
     ${e.text ? `<p class="entry-text">${esc(e.text)}</p>` : '<p class="entry-text muted">Uten notat</p>'}
@@ -382,7 +390,9 @@ const VIEWS = {
     state.weekCache = data;
     const total = data.reduce((n, s) => n + s.entries.length, 0);
     const isThisWeek = start === mondayOf(today());
-    const saved = (await db.get('meta', `summary:${start}`))?.text || '';
+    const rsh = reportShip();
+    const saved = (await db.get('meta', `summary:${rsh.id}:${start}`))?.text || '';
+    const rTotal = data.find((x) => x.ship.id === rsh.id)?.entries.length || 0;
     const hasKey = !!summary.getApiKey();
 
     // Bilder i uka (nyeste først) til bildeoversikten
@@ -416,15 +426,18 @@ const VIEWS = {
         <aside class="week-side">
           ${sync.canUseFolder() ? oneDriveCard() : ''}
           <div class="card summary-card">
-            <h2>${icon('sparkle')} Ukessammendrag til Marine Manager</h2>
-            <p class="muted small">På engelsk · begge skip · ${total} ${total === 1 ? 'registrering' : 'registreringer'} denne uka</p>
+            <h2>${icon('sparkle')} Ukesrapport til Marine Manager</h2>
+            ${shipChips()}
+            <p class="muted small">På engelsk · ${esc(rsh.name)} · ${rTotal} ${rTotal === 1 ? 'registrering' : 'registreringer'} denne uka</p>
+            <div class="mm-title"><span class="muted small">Tittel</span><b>${esc(mmWeekTitle(rsh, start))}</b>
+              <button class="btn small ghost" data-action="copy-title" data-title="${esc(mmWeekTitle(rsh, start))}" aria-label="Kopier tittel">${icon('copy')}</button></div>
             <div class="row">
               <button class="btn primary" data-action="ai-summary" data-kind="week" ${state.aiBusy ? 'disabled' : ''}>${icon('sparkle')} ${state.aiBusy ? 'Lager sammendrag …' : 'Lag med AI'}</button>
               <button class="btn" data-action="copy-for-claude" data-kind="week">${icon('copy')} Kopier til Claude-appen</button>
             </div>
             ${hasKey ? '' : `<p class="muted small">«Lag med AI» krever en API-nøkkel (<a href="#" data-action="nav" data-view="settings">Innstillinger</a>). Uten nøkkel: trykk «Kopier til Claude-appen», lim inn i Claude-appen, og lim svaret inn her.</p>`}
-            <textarea id="summaryText" rows="12" data-input="summary" data-key="summary:${start}" placeholder="Sammendraget kommer her. Du kan rette teksten før du kopierer.">${esc(saved)}</textarea>
-            <button class="btn big primary-outline" data-action="copy-summary">${icon('copy')} Kopier sammendrag</button>
+            <textarea id="summaryText" rows="12" data-input="summary" data-key="summary:${rsh.id}:${start}" placeholder="Teksten til «Description» kommer her. Du kan rette den før du kopierer.">${esc(saved)}</textarea>
+            <button class="btn big primary-outline" data-action="copy-summary">${icon('copy')} Kopier tekst</button>
           </div>
 
           <div class="card desktop-only">
@@ -476,12 +489,13 @@ const VIEWS = {
   async dayreport() {
     const date = state.date;
     const isToday = date === today();
-    const ships = await Promise.all(state.settings.ships.map(async (sh) => ({
+    const rsh = reportShip();
+    const ships = await Promise.all([rsh].map(async (sh) => ({
       sh,
       crew: await getCrew(sh.id, date),
       entries: (await entriesFor(sh.id, date)).sort((a, b) => (b.time || '').localeCompare(a.time || '')),
     })));
-    const saved = (await db.get('meta', `dsummary:${date}`))?.text || '';
+    const saved = (await db.get('meta', `dsummary:${rsh.id}:${date}`))?.text || '';
     const hasKey = !!summary.getApiKey();
     const nEntries = ships.reduce((n, x) => n + x.entries.length, 0);
     return `
@@ -500,13 +514,15 @@ const VIEWS = {
         <aside class="week-side">
           <div class="card summary-card">
             <h2>${icon('report')} Dagsrapport til Marine Manager</h2>
-            <p class="muted small">På engelsk · begge skip · ${nEntries} ${nEntries === 1 ? 'registrering' : 'registreringer'} · bemanning tas med</p>
+            ${shipChips()}
+            <p class="muted small">På engelsk · ${esc(rsh.name)} · ${nEntries} ${nEntries === 1 ? 'registrering' : 'registreringer'} · gruppert per firma med bemanning</p>
+            ${state.settings.reportName ? '' : '<p class="muted small">Tips: legg inn navn og stilling under Innstillinger → Rapporter, så kommer de med i hilsenen nederst.</p>'}
             <div class="row">
               <button class="btn primary" data-action="ai-summary" data-kind="day" ${state.aiBusy ? 'disabled' : ''}>${icon('sparkle')} ${state.aiBusy ? 'Lager rapport …' : 'Lag med AI'}</button>
               <button class="btn" data-action="copy-for-claude" data-kind="day">${icon('copy')} Kopier til Claude-appen</button>
             </div>
             ${hasKey ? '' : `<p class="muted small">«Lag med AI» krever en API-nøkkel (<a href="#" data-action="nav" data-view="settings">Innstillinger</a>). Uten nøkkel: «Kopier til Claude-appen», lim inn i Claude, og lim svaret inn her.</p>`}
-            <textarea id="summaryText" rows="12" data-input="summary" data-key="dsummary:${date}" placeholder="Dagsrapporten kommer her. Du kan rette teksten før du kopierer.">${esc(saved)}</textarea>
+            <textarea id="summaryText" rows="12" data-input="summary" data-key="dsummary:${rsh.id}:${date}" placeholder="Dagsrapporten kommer her. Du kan rette teksten før du kopierer.">${esc(saved)}</textarea>
             <button class="btn big primary-outline" data-action="copy-summary">${icon('copy')} Kopier dagsrapport</button>
           </div>
           ${ships.map((x) => crewTable(x.sh, x.crew)).join('')}
@@ -543,6 +559,15 @@ const VIEWS = {
             <div class="field grow"><label>Navn</label><input value="${esc(sh.name)}" data-ship-field="name" data-i="${i}"></div>
             <div class="field"><label>Byggenr.</label><input value="${esc(sh.hull)}" data-ship-field="hull" data-i="${i}" placeholder="F.eks. NB 123"></div>
           </div>`).join('')}
+      </div>
+
+      <div class="card">
+        <h2>Rapporter</h2>
+        <p class="muted">Brukes i hilsenen nederst i dagsrapporten («Kind regards, …»).</p>
+        <div class="row">
+          <div class="field grow"><label>Navn</label><input value="${esc(s.reportName || '')}" data-setting="reportName" placeholder="Ditt navn" autocomplete="name"></div>
+          <div class="field"><label>Stilling</label><input value="${esc(s.reportTitle || '')}" data-setting="reportTitle" placeholder="F.eks. Site Supervisor"></div>
+        </div>
       </div>
 
       <div class="card">
@@ -743,44 +768,25 @@ function renderWeekFeed() {
   hydrateThumbs(box);
 }
 
-const weekLabel = (start) => `Week ${isoWeek(start)} (${fmtNum(start)} - ${fmtNum(addDays(start, 6))})`;
-
 async function currentWeekNotes() {
-  const data = await weekData(state.weekStart);
-  const days = weekDays(state.weekStart);
-  const total = data.reduce((n, s) => n + s.entries.length, 0);
-  const ships = [];
-  for (const s of data) {
-    const totals = (await Promise.all(days.map((d) => getCrew(s.ship.id, d)))).map(crewTotal).filter((n) => n > 0);
-    const manpower = totals.length
-      ? `Manpower: average ${Math.round(totals.reduce((a, b) => a + b, 0) / totals.length)} persons/day (range ${Math.min(...totals)}-${Math.max(...totals)}, ${totals.length} ${totals.length === 1 ? 'day' : 'days'} recorded)`
-      : '';
-    ships.push({ name: s.ship.name, hull: s.ship.hull, entries: s.entries, manpower });
-  }
-  return { text: summary.buildNotes(weekLabel(state.weekStart), ships), total: total + ships.filter((x) => x.manpower).length };
+  const sh = reportShip();
+  const entries = (await Promise.all(weekDays(state.weekStart).map((d) => entriesFor(sh.id, d)))).flat()
+    .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+  return { text: summary.buildWeekNotes(mmWeekTitle(sh, state.weekStart), sh, entries), total: entries.length };
 }
 
 async function currentDayNotes() {
+  const sh = reportShip();
   const date = state.date;
-  const ships = [];
-  let total = 0;
-  for (const sh of state.settings.ships) {
-    const entries = (await entriesFor(sh.id, date)).sort((a, b) => (a.time || '').localeCompare(b.time || ''));
-    const crew = await getCrew(sh.id, date);
-    const rows = crewRows(crew);
-    const manpower = rows.length
-      ? `Manpower: ${crewTotal(crew)} (${rows.map((r) => `${r.company || 'Unknown'} ${Number(r.count) || 0}`).join(', ')})`
-      : 'Manpower: not recorded';
-    total += entries.length + rows.length;
-    ships.push({ name: sh.name, hull: sh.hull, entries, manpower });
-  }
-  const d = parseISODate(date);
-  const label = `Daily report ${d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}`;
-  return { text: summary.buildNotes(label, ships), total };
+  const entries = (await entriesFor(sh.id, date)).sort((a, b) => (a.time || '').localeCompare(b.time || ''));
+  const rows = crewRows(await getCrew(sh.id, date));
+  const signOff = ['Kind regards,', state.settings.reportName, state.settings.reportTitle].filter(Boolean).join('\n');
+  const label = `Daily report ${parseISODate(date).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}`;
+  return { text: summary.buildDayNotes(label, sh, rows, entries, signOff), total: entries.length + rows.length };
 }
 
 const notesFor = (kind) => (kind === 'day' ? currentDayNotes() : currentWeekNotes());
-const summaryKey = (kind) => (kind === 'day' ? `dsummary:${state.date}` : `summary:${state.weekStart}`);
+const summaryKey = (kind) => (kind === 'day' ? `dsummary:${reportShip().id}:${state.date}` : `summary:${reportShip().id}:${state.weekStart}`);
 
 const saveSummaryText = debounce((key, text) => db.put('meta', { key, text, updatedAt: Date.now() }), 400);
 
@@ -1003,7 +1009,7 @@ async function openEditor(entry, opts = {}) {
   const photos = order.filter((id) => byId.has(id) && !removed.includes(id)).map((id) => byId.get(id));
 
   state.draft = { entry: e, isNew: opts.restore ? opts.restore.isNew : isNew, photos, removed, added, dirty: !!opts.restore, origShipId: entry?.shipId || e.shipId };
-  renderEditor(await locationHints(e.shipId));
+  renderEditor({ ...(await locationHints(e.shipId)), companies: await editorCompanies(e) });
   const dlg = editorEl();
   if (!dlg.open) dlg.showModal();
   $('.ed-body', dlg).scrollTop = 0;
@@ -1011,7 +1017,16 @@ async function openEditor(entry, opts = {}) {
   if (!opts.files?.length && isNew && !opts.restore) setTimeout(() => $('[name=text]', dlg)?.focus(), 50);
 }
 
-function renderEditor({ hints, last }) {
+/** Firma til redigeringen: dagens bemanning som knapper, alle kjente firma som forslag. */
+async function editorCompanies(e) {
+  const today = crewRows(await getCrew(e.shipId, e.date)).map((r) => r.company).filter(Boolean);
+  const used = (await db.getAllBy('entries', 'shipId', e.shipId)).map((x) => x.company).filter(Boolean);
+  const all = [...new Set([...today, ...(await knownCompanies()), ...used])];
+  const chips = today.length ? today : all.slice(0, 6);
+  return { chips, all };
+}
+
+function renderEditor({ hints, last, companies }) {
   const d = state.draft;
   const e = d.entry;
   const showLast = d.isNew && last && !hasLoc(e.location);
@@ -1034,6 +1049,13 @@ function renderEditor({ hints, last }) {
       <div class="field">
         <label for="f-text">Notat</label>
         <textarea id="f-text" name="text" rows="4" placeholder="Hva skjer? F.eks. «Montering av hovedmotor pågår. Fundament godkjent.»">${esc(e.text)}</textarea>
+      </div>
+
+      <div class="field">
+        <label for="f-company">Firma / underleverandør <span class="muted">(valgfritt)</span></label>
+        ${companies.chips.length ? `<div class="chips company-chips">${companies.chips.map((c) => `<button type="button" class="chip-f ${c === e.company ? 'on' : ''}" data-action="pick-company" data-company="${esc(c)}">${esc(c)}</button>`).join('')}</div>` : ''}
+        <input id="f-company" name="company" value="${esc(e.company)}" list="dl-company" placeholder="Hvem gjelder notatet?" autocomplete="off">
+        <datalist id="dl-company">${companies.all.map((c) => `<option value="${esc(c)}">`).join('')}</datalist>
       </div>
 
       <fieldset class="locbox">
@@ -1089,6 +1111,7 @@ function collectDraft() {
   if (f.elements.shipId?.value) e.shipId = f.elements.shipId.value;
   e.time = f.elements.time.value || hhmm(new Date());
   LOC_FIELDS.forEach((lf) => { e.location[lf.key] = f.elements[`loc-${lf.key}`].value.trim(); });
+  e.company = f.elements.company.value.trim();
 }
 
 function saveDraftLocal() {
@@ -1282,7 +1305,7 @@ const openCamera = () => $('#quickCamera').click();
 
 const ACTIONS = {
   nav: (el, ev) => { ev?.preventDefault?.(); state.view = el.dataset.view; window.scrollTo(0, 0); render(); },
-  'switch-ship': async (el) => { state.settings.activeShip = el.dataset.ship; await saveSettings(); render(); },
+  'switch-ship': async (el) => { state.settings.activeShip = el.dataset.ship; state.reportShip = null; await saveSettings(); render(); },
   'day-step': (el) => { const d = addDays(state.date, Number(el.dataset.step)); if (d <= today()) { state.date = d; render(); } },
   'goto-today': () => { state.date = today(); render(); },
   'week-step': (el) => {
@@ -1305,6 +1328,15 @@ const ACTIONS = {
   'ai-summary': (el) => generateAiSummary(el.dataset.kind),
   'send-onedrive': () => prepareSend(),
   'edit-crew': (el) => openCrewSheet(el.dataset.ship),
+  'report-ship': (el) => { state.reportShip = el.dataset.ship; render(); },
+  'copy-title': async (el) => { toast(await copyText(el.dataset.title) ? 'Tittel kopiert' : 'Kunne ikke kopiere'); },
+  'pick-company': (el) => {
+    const input = $('#f-company');
+    const same = input.value === el.dataset.company;
+    input.value = same ? '' : el.dataset.company;
+    $$('.company-chips .chip-f', editorEl()).forEach((b) => b.classList.toggle('on', !same && b === el));
+    saveDraftLocal();
+  },
   'crew-add': () => {
     $('#crewRows').insertAdjacentHTML('beforeend', crewRowHtml());
     $('#crewRows .crew-row:last-child .crew-company').focus();
@@ -1481,6 +1513,10 @@ function bindEvents() {
   document.addEventListener('change', (ev) => {
     const el = ev.target;
     if (el.dataset.change && CHANGES[el.dataset.change]) CHANGES[el.dataset.change](el);
+    if (el.dataset.setting) {
+      state.settings[el.dataset.setting] = el.value.trim();
+      saveSettings().then(() => toast('Lagret'));
+    }
     if (el.dataset.shipField) {
       state.settings.ships[Number(el.dataset.i)][el.dataset.shipField] = el.value.trim();
       state.settings.shipsUpdatedAt = Date.now();

@@ -266,7 +266,7 @@ function photoBaseName(e, fmtLocShort) {
   const time = (e.time || '').replace(':', '');
   const loc = fmtLocShort(e.location);
   const text = (e.text || '').split('\n')[0].trim().slice(0, 50);
-  return safeName([time, loc].filter(Boolean).join(' ') + (text ? ` - ${text}` : ''), 100);
+  return safeName([time, e.company, loc].filter(Boolean).join(' ') + (text ? ` - ${text}` : ''), 100);
 }
 
 async function resizeForDoc(blob, max = 1280) {
@@ -311,7 +311,7 @@ async function buildDocx(ship, date, entries, photosById, crew, fmtLoc, fmtLong)
     children.push(new Paragraph({
       heading: HeadingLevel.HEADING_2,
       spacing: { before: 280 },
-      children: [new TextRun(`kl. ${e.time}${loc ? `  ·  ${loc}` : ''}`)],
+      children: [new TextRun(`kl. ${e.time}${e.company ? `  ·  ${e.company}` : ''}${loc ? `  ·  ${loc}` : ''}`)],
     }));
     for (const line of (e.text || '').split('\n')) {
       if (line.trim()) children.push(new Paragraph({ children: [new TextRun(line)] }));
