@@ -8,31 +8,34 @@ lager ukessammendrag til Marine Manager.
 
 ## Kom i gang
 
+Appen er på engelsk. Knappenavnene under er de du ser i appen.
+
 1. **PC (Chrome eller Edge):**
    - Åpne appen og installer den med ikonet i adressefeltet.
-   - Lag mappa `OneDrive\Tilsynsdagbok` i Utforsker.
-   - Trykk **«Velg OneDrive-mappe»** i appen og velg den mappa. Appen lager da `Innboks`.
+   - Lag en mappe i OneDrive, for eksempel `OneDrive - R.G. HAGLAND AS\Desktop\Tilsyns app`.
+   - Trykk **«Choose OneDrive folder»** i appen og velg mappa. Appen lager `Inbox` (en eldre `Innboks` virker også) og `From PC`.
 2. **iPhone (Safari):**
    - Åpne appen, trykk Del-knappen og velg **«Legg til på Hjem-skjerm»**.
-   - Installer også OneDrive-appen og logg inn, hvis du ikke har den.
+   - OneDrive-appen må være installert og logget inn.
 
 ## Daglig bruk
 
 **På iPhone:**
-1. Velg skip og trykk **«Ta bilde»**. Skriv et par ord og fyll ut sted, og trykk **«Lagre»** (eller **«Lagre og ta neste bilde»**).
-   Registrert på feil skip? Åpne registreringen, velg riktig skip i **«Skip»**-feltet og trykk **«Lagre»**. Bildene og OneDrive-mappene flyttes med.
-2. Når det passer, for eksempel på slutten av dagen: trykk **«Send til OneDrive»** → **«Åpne del-meny»** → **«Arkiver i Filer»** → **OneDrive → Tilsynsdagbok → Innboks**. iPhone husker mappa.
+1. Velg skip og trykk **«Take photo»**. Velg eventuelt firma (knapper fra dagens bemanning), skriv et par ord og fyll ut sted, og trykk **«Save»** (eller **«Save and take next photo»**).
+2. **Manpower:** trykk på linja og legg inn firma og antall personer om bord. «Same as …» kopierer forrige dag.
+3. **Send til PC:** trykk **«Send to OneDrive»** → **«Open share menu»** → **«Arkiver i Filer»** → OneDrive → app-mappa → **Inbox**.
+4. **Hent fra PC:** trykk **«Get from PC»** og velg `From PC/site-diary-from-pc.json` i OneDrive.
+   Du får da med endringer gjort på PC-en: registreringer, bemanning, slettinger og bilder.
 
-**På PC:** når appen er åpen, henter den inn sendingene automatisk. Bilder og Word-dagbok havner i
-`Tilsynsdagbok\<skip>\<dato>\`. Startsiden viser ukeoversikten.
+**Registrert på feil skip?** Åpne registreringen, velg riktig skip i **«Vessel»** og trykk **«Save»**.
 
-**Bemanning:** trykk på **«Bemanning»** i dagboken og legg inn firma og antall personer om bord, med − / +.
-«Samme som …» kopierer forrige dag. Bemanningen sendes med til PC-en og kommer med i Word-dagboken.
+**På PC:** når appen er åpen, henter den inn sendingene automatisk (hvert 2. minutt). Bilder og Word-dagbok («Daily log») havner i
+`<mappe>\<skip>\<dato>\`. Endringer du gjør på PC-en, skrives til `From PC` slik at iPhone kan hente dem.
 
-**Dagsrapport:** trykk **«Dagsrapport»** i dagboken (fanen «Dagsrapport» på PC). Trykk **«Lag med AI»** eller **«Kopier til Claude-appen»**,
-og så **«Kopier dagsrapport»**. Rapporten er på engelsk, med begge skip og bemanningen.
-
-**Ukesrapport:** åpne ukeoversikten (kalender-ikonet på iPhone) og trykk **«Lag med AI»** eller **«Kopier til Claude-appen»**. Trykk så **«Kopier sammendrag»** og lim inn i Marine Manager.
+**Rapporter til Marine Manager** (lages per skip, på engelsk):
+- **Daily report:** «Good afternoon», så «<Firma> – N people on board» med korte setninger, og til slutt signatur. Navn og stilling legger du inn under Settings → Reports.
+- **Weekly report** (fanen «Week»): tekst til «Description»-feltet i MM, og ferdig tittel, for eksempel «NB 853. Week 47 (Nov 16, 2026 - Nov 22, 2026)».
+- Trykk **«Write with AI»** (krever API-nøkkel) eller **«Copy for Claude app»**, og så **«Copy text»**.
 
 Se [PLAN.md](PLAN.md) for detaljer og videre planer.
 

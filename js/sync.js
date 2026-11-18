@@ -5,8 +5,11 @@
 import * as db from './db.js';
 
 const DOCX_URL = 'https://cdn.jsdelivr.net/npm/docx@9.15.1/+esm';
-const INBOX = 'Innboks';
-const PROCESSED = 'Behandlet';
+const INBOX = 'Inbox';
+const INBOX_NAMES = ['Inbox', 'Innboks']; // 'Innboks' fra eldre oppsett virker fortsatt
+const PROCESSED = 'Processed';
+const FROM_PC = 'From PC';
+const SNAPSHOT = 'site-diary-from-pc.json';
 
 export const canUseFolder = () => 'showDirectoryPicker' in window;
 
@@ -31,7 +34,7 @@ export const b64ToBlob = (b64, type = 'image/jpeg') => {
 export function safeName(s, max = 90) {
   let n = String(s || '').replace(/[<>:"/\\|?*\u0000-\u001f#%]+/g, ' ').replace(/\s+/g, ' ').trim();
   if (n.length > max) n = n.slice(0, max).trim();
-  return n.replace(/[. ]+$/, '') || 'Uten navn';
+  return n.replace(/[. ]+$/, '') || 'Untitled';
 }
 
 /* ------------------------------------------------------------------ */
@@ -151,14 +154,17 @@ export async function shareBundle(bundle) {
 /* ------------------------------------------------------------------ */
 
 /** Slår en pakke inn i lokal database. Nyeste versjon av hver registrering vinner. */
-export async function applyBundle(data, settings) {
+export async function applyBundle(data, settings, { markSent = false } = {}) {
   let changed = 0;
   const accepted = new Set();
+  const same = new Set();
   for (const e of data.entries || []) {
     const cur = await db.get('entries', e.id);
     if (cur && (cur.updatedAt || 0) > (e.updatedAt || 0)) continue;
+    if (cur && (cur.updatedAt || 0) === (e.updatedAt || 0)) { same.add(e.id); continue; }
     const { sentAt, ...clean } = e;
-    await db.put('entries', clean);
+    // Fra PC til iPhone: merk som sendt, så det ikke sendes tilbake igjen
+    await db.put('entries', markSent ? { ...clean, sentAt: clean.updatedAt || Date.now() } : clean);
     accepted.add(e.id);
     changed++;
     // Fjern bilder som er tatt ut av registreringen
@@ -166,16 +172,20 @@ export async function applyBundle(data, settings) {
     const old = (await db.getAllBy('photos', 'entryId', e.id)).filter((p) => !keep.has(p.id)).map((p) => p.id);
     if (old.length) await db.delMany('photos', old);
   }
-  const photos = (data.photos || []).filter((p) => accepted.has(p.entryId) || !data.kind)
-    .map((p) => ({ ...p, blob: b64ToBlob(p.blob), thumb: p.thumb ? b64ToBlob(p.thumb) : null }));
+  const wanted = [];
+  for (const p of data.photos || []) {
+    if (accepted.has(p.entryId) || !data.kind) wanted.push(p);
+    else if (same.has(p.entryId) && !(await db.get('photos', p.id))) wanted.push(p); // manglende bilde
+  }
+  const photos = wanted.map((p) => ({ ...p, blob: b64ToBlob(p.blob), thumb: p.thumb ? b64ToBlob(p.thumb) : null }));
   for (let i = 0; i < photos.length; i += 20) await db.putMany('photos', photos.slice(i, i + 20));
 
   for (const c of data.crew || []) {
     if (!isCrew(c)) continue;
     const cur = await db.get('meta', c.key);
-    if (cur && (cur.updatedAt || 0) > (c.updatedAt || 0)) continue;
+    if (cur && (cur.updatedAt || 0) >= (c.updatedAt || 0)) continue;
     const { sentAt, ...clean } = c;
-    await db.put('meta', clean);
+    await db.put('meta', markSent ? { ...clean, sentAt: clean.updatedAt || Date.now() } : clean);
     changed++;
   }
 
@@ -213,7 +223,7 @@ export async function pickRoot() {
     if (outKeys.length) await db.delMany('meta', outKeys);
   }
   await db.put('meta', { key: 'rootDir', handle });
-  await handle.getDirectoryHandle(INBOX, { create: true });
+  await inboxDirs(handle);
   return handle;
 }
 
@@ -240,12 +250,22 @@ async function removeQuiet(dir, name, opts) {
   try { await dir.removeEntry(name, opts); } catch { /* finnes ikke / ikke tom */ }
 }
 
-/** Leser inn nye pakker fra Innboks og flytter dem til Innboks/Behandlet. */
+/** Innboks-mappene som finnes ('Inbox' og/eller eldre 'Innboks'). Lager 'Inbox' hvis ingen finnes. */
+async function inboxDirs(root) {
+  const dirs = [];
+  for (const n of INBOX_NAMES) {
+    try { dirs.push(await root.getDirectoryHandle(n)); } catch { /* finnes ikke */ }
+  }
+  if (!dirs.length) dirs.push(await root.getDirectoryHandle(INBOX, { create: true }));
+  return dirs;
+}
+
+/** Leser inn nye pakker fra innboksen og flytter dem til <innboks>/Processed. */
 async function importInbox(root, settings) {
-  const inbox = await root.getDirectoryHandle(INBOX, { create: true });
-  let processed = null;
   let files = 0;
   let changed = 0;
+  for (const inbox of await inboxDirs(root)) {
+  let processed = null;
   for await (const [name, h] of inbox.entries()) {
     if (h.kind !== 'file' || !/^tilsyn.*\.(json|txt)$/i.test(name)) continue;
     let data;
@@ -257,6 +277,7 @@ async function importInbox(root, settings) {
     await removeQuiet(inbox, name);
     files++;
   }
+  }
   return { files, changed };
 }
 
@@ -266,7 +287,7 @@ function photoBaseName(e, fmtLocShort) {
   const time = (e.time || '').replace(':', '');
   const loc = fmtLocShort(e.location);
   const text = (e.text || '').split('\n')[0].trim().slice(0, 50);
-  return safeName([time, loc].filter(Boolean).join(' ') + (text ? ` - ${text}` : ''), 100);
+  return safeName([time, e.company, loc].filter(Boolean).join(' ') + (text ? ` - ${text}` : ''), 100);
 }
 
 async function resizeForDoc(blob, max = 1280) {
@@ -285,33 +306,33 @@ async function resizeForDoc(blob, max = 1280) {
 async function buildDocx(ship, date, entries, photosById, crew, fmtLoc, fmtLong) {
   const { Document, Packer, Paragraph, TextRun, HeadingLevel, ImageRun, Table, TableRow, TableCell, WidthType } = await import(DOCX_URL);
   const children = [
-    new Paragraph({ heading: HeadingLevel.TITLE, children: [new TextRun(`Dagbok – ${ship.name}${ship.hull ? ` (${ship.hull})` : ''}`)] }),
+    new Paragraph({ heading: HeadingLevel.TITLE, children: [new TextRun(`Daily log – ${ship.name}${ship.hull ? ` (${ship.hull})` : ''}`)] }),
     new Paragraph({ children: [new TextRun({ text: fmtLong(date), italics: true })] }),
-    new Paragraph({ children: [new TextRun({ text: `${entries.length} ${entries.length === 1 ? 'registrering' : 'registreringer'}`, color: '666666' })] }),
+    new Paragraph({ children: [new TextRun({ text: `${entries.length} ${entries.length === 1 ? 'entry' : 'entries'}`, color: '666666' })] }),
   ];
   const rows = (crew?.rows || []).filter((r) => r.company || r.count);
   if (rows.length) {
     const total = rows.reduce((n, r) => n + (Number(r.count) || 0), 0);
     const cell = (text, bold = false) => new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: String(text), bold })] })] });
     children.push(
-      new Paragraph({ heading: HeadingLevel.HEADING_1, spacing: { before: 240 }, children: [new TextRun(`Bemanning om bord: ${total}`)] }),
+      new Paragraph({ heading: HeadingLevel.HEADING_1, spacing: { before: 240 }, children: [new TextRun(`Manpower on board: ${total}`)] }),
       new Table({
         width: { size: 60, type: WidthType.PERCENTAGE },
         rows: [
-          new TableRow({ children: [cell('Firma', true), cell('Antall', true)] }),
+          new TableRow({ children: [cell('Company', true), cell('People', true)] }),
           ...rows.map((r) => new TableRow({ children: [cell(r.company || '–'), cell(Number(r.count) || 0)] })),
-          new TableRow({ children: [cell('Totalt', true), cell(total, true)] }),
+          new TableRow({ children: [cell('Total', true), cell(total, true)] }),
         ],
       }),
     );
   }
-  if (entries.length) children.push(new Paragraph({ heading: HeadingLevel.HEADING_1, spacing: { before: 240 }, children: [new TextRun('Registreringer')] }));
+  if (entries.length) children.push(new Paragraph({ heading: HeadingLevel.HEADING_1, spacing: { before: 240 }, children: [new TextRun('Entries')] }));
   for (const e of entries) {
     const loc = fmtLoc(e.location);
     children.push(new Paragraph({
       heading: HeadingLevel.HEADING_2,
       spacing: { before: 280 },
-      children: [new TextRun(`kl. ${e.time}${loc ? `  ·  ${loc}` : ''}`)],
+      children: [new TextRun(`${e.time}${e.company ? `  ·  ${e.company}` : ''}${loc ? `  ·  ${loc}` : ''}`)],
     }));
     for (const line of (e.text || '').split('\n')) {
       if (line.trim()) children.push(new Paragraph({ children: [new TextRun(line)] }));
@@ -329,11 +350,11 @@ async function buildDocx(ship, date, entries, photosById, crew, fmtLoc, fmtLong)
       } catch (err) { console.warn('Bilde hoppet over i Word', err); }
     }
   }
-  const doc = new Document({ creator: 'Tilsynsdagbok', title: `Dagbok ${ship.name} ${date}`, sections: [{ children }] });
+  const doc = new Document({ creator: 'Site Diary', title: `Daily log ${ship.name} ${date}`, sections: [{ children }] });
   return Packer.toBlob(doc);
 }
 
-const daySig = (shipName, entries, crew) => shipName + '|' + entries.map((e) => `${e.id}:${e.updatedAt || 0}`).sort().join(',') + `|crew:${crew?.updatedAt || 0}`;
+const daySig = (shipName, entries, crew) => 'v3|' + shipName + '|' + entries.map((e) => `${e.id}:${e.updatedAt || 0}`).sort().join(',') + `|crew:${crew?.updatedAt || 0}`;
 
 /** Skriver mappa for én dag: bilder + Word-dagbok. Fjerner filer som ikke lenger hører til. */
 async function writeDay(root, ship, date, entries, crew, prev, h) {
@@ -358,7 +379,7 @@ async function writeDay(root, ship, date, entries, crew, prev, h) {
         if (!same) await writeFile(dayDir, name, p.blob);
       }
     }
-    const docName = safeName(`Dagbok ${ship.name} ${date}`) + '.docx';
+    const docName = safeName(`Daily log ${ship.name} ${date}`) + '.docx';
     files[docName] = 'docx';
     await writeFile(dayDir, docName, await buildDocx(ship, date, entries, photos, crew, h.fmtLoc, h.fmtLong));
   }
@@ -383,8 +404,8 @@ async function writeDay(root, ship, date, entries, crew, prev, h) {
  */
 export async function syncFolder(settings, h) {
   const root = await getRoot();
-  if (!root) throw new Error('Ingen OneDrive-mappe valgt.');
-  if (await permission(root) !== 'granted') throw new Error('Appen mangler tilgang til mappa. Trykk «Koble til».');
+  if (!root) throw new Error('No OneDrive folder selected.');
+  if (await permission(root) !== 'granted') throw new Error('The app has no access to the folder. Click “Connect”.');
 
   const inbox = await importInbox(root, settings);
 
@@ -418,12 +439,75 @@ export async function syncFolder(settings, h) {
     const sig = daySig(ship.name, list, crew);
     const prev = prevByKey.get(k);
     if (prev?.sig === sig) continue;
-    h.onProgress?.(`Skriver ${ship.name} ${date} (${n}/${total}) …`);
+    h.onProgress?.(`Writing ${ship.name} ${date} (${n}/${total}) …`);
     const res = await writeDay(root, ship, date, list, crew, prev, h);
     if (list.length || crew?.rows?.length) await db.put('meta', { key: `out:${k}`, sig, ...res, at: Date.now() });
     else await db.del('meta', `out:${k}`);
     days++;
   }
+  const snapshot = await writeSnapshot(root, settings);
   await db.put('meta', { key: 'lastSync', at: Date.now() });
-  return { imported: inbox.files, changed: inbox.changed, days, folder: root.name };
+  return { imported: inbox.files, changed: inbox.changed, days, folder: root.name, snapshot };
+}
+
+/* ------------------------------------------------------------------ */
+/* PC → iPhone                                                         */
+/* ------------------------------------------------------------------ */
+
+/** PC: husk slettinger, så iPhone også fjerner dem når den henter endringer. */
+export async function addPcTombstone(entry) {
+  if (!entry) return;
+  const list = (await db.get('meta', 'pcTombstones'))?.list || [];
+  list.push({ id: entry.id, shipId: entry.shipId, date: entry.date, deletedAt: Date.now() });
+  await db.put('meta', { key: 'pcTombstones', list: list.slice(-2000) });
+}
+
+/**
+ * Skriver «From PC/site-diary-from-pc.json» med alt iPhone trenger for å få PC-endringer:
+ * registreringer, bemanning, slettinger, skipsnavn og bilder som er lagt inn på PC.
+ * Skrives bare når noe er endret.
+ */
+async function writeSnapshot(root, settings) {
+  const entries = await db.getAll('entries');
+  const crew = await allCrew();
+  const tombstones = (await db.get('meta', 'pcTombstones'))?.list || [];
+  const sig = [
+    entries.map((e) => `${e.id}:${e.updatedAt || 0}`).sort().join(','),
+    crew.map((c) => `${c.key}:${c.updatedAt || 0}`).sort().join(','),
+    tombstones.length, JSON.stringify(settings.ships),
+  ].join('|');
+  if ((await db.get('meta', 'snapshotSig'))?.sig === sig) return false;
+
+  const createdAt = Date.now();
+  const parts = [
+    `{"app":"tilsynsdagbok","version":3,"kind":"pc-snapshot","createdAt":${createdAt},`,
+    `"settings":${JSON.stringify({ ships: settings.ships, shipsUpdatedAt: settings.shipsUpdatedAt || 0 })},`,
+    `"entries":${JSON.stringify(entries.map(({ sentAt, ...e }) => e))},`,
+    `"crew":${JSON.stringify(crew.map(({ sentAt, ...c }) => c))},`,
+    `"tombstones":${JSON.stringify(tombstones)},"photos":[`,
+  ];
+  let first = true;
+  const ids = await db.getAllKeys('photos');
+  for (const id of ids) {
+    const p = await db.get('photos', id);
+    if (p?.origin !== 'pc') continue; // bilder fra iPhone har iPhone allerede
+    const { blob, thumb, ...rest } = p;
+    parts.push((first ? '' : ',') + JSON.stringify({ ...rest, blob: await blobToB64(blob), thumb: thumb ? await blobToB64(thumb) : null }));
+    first = false;
+  }
+  parts.push(']}');
+  const dir = await root.getDirectoryHandle(FROM_PC, { create: true });
+  await writeFile(dir, SNAPSHOT, new Blob(parts, { type: 'application/json' }));
+  await db.put('meta', { key: 'snapshotSig', sig, at: createdAt });
+  return true;
+}
+
+/** iPhone: les fila fra PC-en og slå den inn. Returnerer antall endringer. */
+export async function importFromPc(file, settings) {
+  let data;
+  try { data = JSON.parse(await file.text()); } catch { throw new Error('This is not a valid file.'); }
+  if (data?.app !== 'tilsynsdagbok') throw new Error('This file is not from Site Diary.');
+  const changed = await applyBundle(data, settings, { markSent: true });
+  await db.put('meta', { key: 'lastFromPc', at: data.createdAt || Date.now(), importedAt: Date.now() });
+  return { changed, createdAt: data.createdAt };
 }
