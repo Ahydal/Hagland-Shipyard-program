@@ -114,7 +114,7 @@ export async function shareBundle(bundle) {
   for (const file of variants) {
     if (navigator.canShare?.({ files: [file] })) {
       try {
-        await navigator.share({ files: [file], title: 'Tilsynsdagbok' });
+        await navigator.share({ files: [file] }); // bare filen – en tittel blir en ekstra tekstfil i «Arkiver i Filer»
         return true;
       } catch (err) {
         if (err.name === 'AbortError') return false;
