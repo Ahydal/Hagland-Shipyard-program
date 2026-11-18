@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="no">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b3d5c">
+  <meta name="description" content="Ta bilder og skriv korte notater under byggetilsyn på nybygg.">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Tilsyn">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="css/styles.css">
+  <title>Tilsynsdagbok</title>
+</head>
+<body>
+  <header class="topbar" id="topbar"></header>
+  <main id="main" class="main"></main>
+
+  <dialog id="editor" class="editor-dialog" aria-label="Registrering"></dialog>
+  <dialog id="lightbox" class="lightbox-dialog" aria-label="Bildeviser"></dialog>
+  <input type="file" id="quickCamera" accept="image/*" capture="environment" hidden>
+  <div id="toast" role="status" aria-live="polite"></div>
+
+  <noscript>Tilsynsdagbok krever JavaScript.</noscript>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
