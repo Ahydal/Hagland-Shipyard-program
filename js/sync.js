@@ -184,6 +184,12 @@ export async function getRoot() {
 
 export async function pickRoot() {
   const handle = await window.showDirectoryPicker({ id: 'tilsynsdagbok', mode: 'readwrite', startIn: 'documents' });
+  const old = await getRoot();
+  if (!old || !(await old.isSameEntry(handle).catch(() => false))) {
+    // Ny mappe: glem hva som er skrevet før, så alle dager skrives på nytt i den nye mappa
+    const outKeys = (await db.getAllKeys('meta')).filter((k) => String(k).startsWith('out:'));
+    if (outKeys.length) await db.delMany('meta', outKeys);
+  }
   await db.put('meta', { key: 'rootDir', handle });
   await handle.getDirectoryHandle(INBOX, { create: true });
   return handle;

@@ -705,7 +705,7 @@ async function prepareSend() {
       <ol class="howto">
         <li>Trykk «Åpne del-meny».</li>
         <li>Velg <b>«Arkiver i Filer»</b>.</li>
-        <li>Velg <b>OneDrive → Tilsynsdagbok → Innboks</b> og trykk «Arkiver».</li>
+        <li>Velg <b>OneDrive</b> (den samme som PC-en bruker, f.eks. «OneDrive – Hagland») → <b>Tilsynsdagbok → Innboks</b> og trykk «Arkiver».</li>
       </ol>
       <button class="btn primary big" data-action="share-bundle">${icon('cloud')} Åpne del-meny</button>
       <button class="btn ghost" data-action="close-sheet">Avbryt</button>
