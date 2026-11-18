@@ -1,6 +1,7 @@
 import * as db from './db.js';
+import * as summary from './summary.js';
 
-const APP_VERSION = '2.0.0';
+const APP_VERSION = '2.1.0';
 
 /* ------------------------------------------------------------------ */
 /* Konstanter                                                          */
@@ -40,6 +41,10 @@ const ICON_PATHS = {
   upload: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>',
   ship: '<path d="M2 17l2 4h16l2-4H2z"/><path d="M6 17V9h8l3 8"/><path d="M9 9V5h4v4"/>',
   history: '<polyline points="1 4 1 10 7 10"/><path d="M3.5 15a9 9 0 1 0 2.1-9.4L1 10"/>',
+  calendar: '<rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>',
+  sparkle: '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9z"/>',
+  copy: '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+  key: '<circle cx="7.5" cy="15.5" r="5.5"/><path d="M21 2l-9.6 9.6"/><path d="M15.5 7.5l3 3L22 7l-3-3"/>',
 };
 const icon = (name, cls = '') => `<svg class="ico ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICON_PATHS[name] || ''}</svg>`;
 
@@ -63,6 +68,37 @@ const addDays = (s, n) => { const d = parseISODate(s); d.setDate(d.getDate() + n
 const fmtLong = (s) => parseISODate(s).toLocaleDateString('nb-NO', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 const safeFile = (s) => String(s).replace(/[^\wæøåÆØÅ.-]+/g, '_');
+const fmtNum = (s) => parseISODate(s).toLocaleDateString('nb-NO', { day: '2-digit', month: '2-digit', year: 'numeric' });
+const isDesktop = () => matchMedia('(min-width: 900px)').matches;
+
+/** Mandag i uka datoen tilhører. */
+const mondayOf = (s) => addDays(s, -((parseISODate(s).getDay() + 6) % 7));
+/** ISO-ukenummer. */
+function isoWeek(s) {
+  const d = parseISODate(mondayOf(s));
+  d.setDate(d.getDate() + 3); // torsdag i samme uke
+  const jan4 = new Date(d.getFullYear(), 0, 4);
+  return 1 + Math.round(((d - jan4) / 864e5 - 3 + ((jan4.getDay() + 6) % 7)) / 7);
+}
+const weekDays = (start) => Array.from({ length: 7 }, (_, i) => addDays(start, i));
+const DAY_SHORT = ['Man', 'Tir', 'Ons', 'Tor', 'Fre', 'Lør', 'Søn'];
+
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    ta.remove();
+    return ok;
+  }
+}
 
 function fmtLoc(loc) {
   if (!loc) return '';
@@ -121,6 +157,11 @@ const state = {
   lightbox: null,
   installPrompt: null,
   lastLoc: null,
+  weekStart: mondayOf(today()),
+  weekShip: 'all',
+  weekQuery: '',
+  weekPhotoOrder: [],
+  aiBusy: false,
 };
 
 const ship = () => state.settings.ships.find((s) => s.id === state.settings.activeShip) || state.settings.ships[0];
@@ -206,10 +247,27 @@ async function processImage(file, stamp) {
 /* ------------------------------------------------------------------ */
 
 function renderTopbar() {
+  const back = isDesktop() ? state.homeView || 'day' : 'day';
   if (state.view === 'settings') {
     $('#topbar').innerHTML = `
-      <button class="icon-btn" data-action="nav" data-view="day" aria-label="Tilbake">${icon('left')}</button>
+      <button class="icon-btn" data-action="nav" data-view="${back}" aria-label="Tilbake">${icon('left')}</button>
       <h1 class="topbar-title">Innstillinger</h1>`;
+    return;
+  }
+  const tabs = `
+    <div class="topbar-name desktop-only">${icon('ship')}<span>Tilsynsdagbok</span></div>
+    <nav class="tabs desktop-only">
+      <button class="${state.view === 'week' ? 'on' : ''}" data-action="nav" data-view="week">${icon('calendar')} Uke</button>
+      <button class="${state.view === 'day' ? 'on' : ''}" data-action="nav" data-view="day">${icon('camera')} Dagbok</button>
+    </nav>`;
+  const gear = `<button class="icon-btn" data-action="nav" data-view="settings" aria-label="Innstillinger">${icon('gear')}</button>`;
+  if (state.view === 'week') {
+    $('#topbar').innerHTML = `
+      <button class="icon-btn mobile-only" data-action="nav" data-view="day" aria-label="Tilbake">${icon('left')}</button>
+      <h1 class="topbar-title mobile-only">Ukessammendrag</h1>
+      ${tabs}
+      <span class="spacer"></span>
+      ${gear}`;
     return;
   }
   const ships = state.settings.ships;
@@ -221,29 +279,35 @@ function renderTopbar() {
     : `<select class="ship-select" data-change="ship-select">${ships.map((s) =>
         `<option value="${s.id}" ${s.id === ship().id ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select>`;
   $('#topbar').innerHTML = `
-    <div class="topbar-brand" title="Tilsynsdagbok">${icon('ship')}</div>
+    <button class="icon-btn mobile-only" data-action="nav" data-view="week" aria-label="Ukessammendrag">${icon('calendar')}</button>
+    ${tabs}
     ${sel}
-    <button class="icon-btn" data-action="nav" data-view="settings" aria-label="Innstillinger">${icon('gear')}</button>`;
+    ${gear}`;
 }
 
 let renderToken = 0;
 async function render() {
   const token = ++renderToken;
+  if (state.view !== 'settings') state.homeView = state.view;
   renderTopbar();
   const html = await VIEWS[state.view]();
   if (token !== renderToken) return;
   const main = $('#main');
+  main.classList.toggle('wide', state.view === 'week');
   main.innerHTML = html;
   hydrateThumbs(main);
+  if (state.view === 'week') renderWeekFeed();
 }
 
-function entryCard(e) {
+function entryCard(e, { showShip = false } = {}) {
   const loc = fmtLoc(e.location);
   const ids = e.photoIds || [];
+  const sh = showShip ? state.settings.ships.find((s) => s.id === e.shipId) : null;
   return `
   <article class="entry" data-action="edit" data-id="${e.id}" tabindex="0">
     <div class="entry-top">
       <time>${esc(e.time || '')}</time>
+      ${sh ? `<span class="ship-badge">${esc(sh.name)}</span>` : ''}
       ${loc ? `<span class="loc">${icon('pin')}${esc(loc)}</span>` : ''}
     </div>
     ${e.text ? `<p class="entry-text">${esc(e.text)}</p>` : '<p class="entry-text muted">Uten notat</p>'}
@@ -291,6 +355,104 @@ const VIEWS = {
     <button class="fab" data-action="quick-photo" aria-label="Ta bilde">${icon('camera')}</button>`;
   },
 
+  async week() {
+    const start = state.weekStart;
+    const days = weekDays(start);
+    const end = days[6];
+    const data = await weekData(start);
+    state.weekCache = data;
+    const total = data.reduce((n, s) => n + s.entries.length, 0);
+    const isThisWeek = start === mondayOf(today());
+    const saved = (await db.get('meta', `summary:${start}`))?.text || '';
+    const hasKey = !!summary.getApiKey();
+
+    // Bilder i uka (nyeste først) til bildeoversikten
+    const photos = data.flatMap((s) => s.entries.flatMap((e) => e.photoIds.map((id) => ({ id, e }))))
+      .sort((a, b) => (b.e.date + b.e.time).localeCompare(a.e.date + a.e.time));
+    state.weekPhotoOrder = photos.map((p) => p.id);
+
+    // Mest brukte steder
+    const tally = (key) => {
+      const m = new Map();
+      data.forEach((s) => s.entries.forEach((e) => { const v = e.location?.[key]; if (v) m.set(v, (m.get(v) || 0) + 1); }));
+      return [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6);
+    };
+    const tallyList = (title, rows, prefix = '') => `
+      <div><h3>${title}</h3>${rows.length
+        ? `<ul class="tally">${rows.map(([v, n]) => `<li><span>${esc(prefix + v)}</span><b>${n}</b></li>`).join('')}</ul>`
+        : '<p class="muted small">Ingen registrert</p>'}</div>`;
+
+    return `
+    <section class="view">
+      <div class="daybar">
+        <button class="icon-btn" data-action="week-step" data-step="-7" aria-label="Forrige uke">${icon('left')}</button>
+        <div class="daypick static">
+          <span class="daypick-label">${isThisWeek ? 'Denne uka' : 'Uke'}</span>
+          <span class="daypick-date">Uke ${isoWeek(start)} · ${parseISODate(start).getDate()}.${parseISODate(start).getMonth() + 1}. – ${fmtNum(end)}</span>
+        </div>
+        <button class="icon-btn" data-action="week-step" data-step="7" aria-label="Neste uke" ${isThisWeek ? 'disabled' : ''}>${icon('right')}</button>
+      </div>
+
+      <div class="week-grid">
+        <aside class="week-side">
+          <div class="card summary-card">
+            <h2>${icon('sparkle')} Ukessammendrag til Marine Manager</h2>
+            <p class="muted small">På engelsk · begge skip · ${total} ${total === 1 ? 'registrering' : 'registreringer'} denne uka</p>
+            <div class="row">
+              <button class="btn primary" data-action="ai-summary" ${state.aiBusy ? 'disabled' : ''}>${icon('sparkle')} ${state.aiBusy ? 'Lager sammendrag …' : 'Lag med AI'}</button>
+              <button class="btn" data-action="copy-for-claude">${icon('copy')} Kopier til Claude-appen</button>
+            </div>
+            ${hasKey ? '' : `<p class="muted small">«Lag med AI» krever en API-nøkkel (<a href="#" data-action="nav" data-view="settings">Innstillinger</a>). Uten nøkkel: trykk «Kopier til Claude-appen», lim inn i Claude-appen, og lim svaret inn her.</p>`}
+            <textarea id="summaryText" rows="12" data-input="summary" placeholder="Sammendraget kommer her. Du kan rette teksten før du kopierer.">${esc(saved)}</textarea>
+            <button class="btn big primary-outline" data-action="copy-summary">${icon('copy')} Kopier sammendrag</button>
+          </div>
+
+          <div class="card desktop-only">
+            <h2>Ukeoversikt</h2>
+            <div class="table-wrap"><table class="overview">
+              <thead><tr><th></th>${days.map((d, i) => `<th class="${d === today() ? 'today' : ''}">${DAY_SHORT[i]}<small>${parseISODate(d).getDate()}.</small></th>`).join('')}<th>Sum</th></tr></thead>
+              <tbody>${data.map((s) => `<tr>
+                <th>${esc(s.ship.name)}</th>
+                ${days.map((d) => { const n = s.entries.filter((e) => e.date === d).length; return `<td class="${n ? '' : 'zero'}">${n ? `<a href="#" data-action="open-day" data-date="${d}" data-ship="${s.ship.id}">${n}</a>` : '–'}</td>`; }).join('')}
+                <td class="sum">${s.entries.length}<small>${s.photos} ${s.photos === 1 ? 'bilde' : 'bilder'}</small></td></tr>`).join('')}</tbody>
+            </table></div>
+            <p class="muted small">Tallene viser registreringer per dag. Klikk for å åpne dagen.</p>
+          </div>
+
+          <div class="card desktop-only">
+            <h2>Mest brukte steder</h2>
+            <div class="tally-grid">
+              ${tallyList('Seksjon', tally('section'), 'Seksj. ')}
+              ${tallyList('Dekk', tally('deck'))}
+              ${tallyList('Rom', tally('room'))}
+            </div>
+          </div>
+        </aside>
+
+        <div class="week-main desktop-only">
+          <div class="card">
+            <div class="feed-head">
+              <h2>Ukas registreringer</h2>
+              <div class="chips">
+                <button class="chip-f ${state.weekShip === 'all' ? 'on' : ''}" data-action="week-ship" data-ship="all">Alle</button>
+                ${state.settings.ships.map((s) => `<button class="chip-f ${state.weekShip === s.id ? 'on' : ''}" data-action="week-ship" data-ship="${s.id}">${esc(s.name)}</button>`).join('')}
+              </div>
+            </div>
+            <input type="search" class="feed-search" placeholder="Filtrer på tekst eller sted …" value="${esc(state.weekQuery)}" data-input="week-query">
+            <div id="weekFeed"></div>
+          </div>
+
+          ${photos.length ? `<div class="card">
+            <h2>Ukas bilder <span class="muted small">(${photos.length})</span></h2>
+            <div class="gallery">${photos.slice(0, 48).map((p, i) => `
+              <img data-photo="${p.id}" data-action="view-photo" data-week="1" data-index="${i}" alt="" loading="lazy" title="${esc(fmtLoc(p.e.location))}">`).join('')}
+            </div>
+          </div>` : ''}
+        </div>
+      </div>
+    </section>`;
+  },
+
   async settings() {
     const s = state.settings;
     let storage = '';
@@ -317,6 +479,24 @@ const VIEWS = {
       <div class="card">
         <h2>Bilder</h2>
         <label class="check"><input type="checkbox" data-change="stamp" ${s.stampPhotos ? 'checked' : ''}> Stemple skipsnavn, dato og klokkeslett i nye bilder</label>
+      </div>
+
+      <div class="card">
+        <h2>${icon('sparkle')} AI-sammendrag (valgfritt)</h2>
+        ${summary.getApiKey()
+          ? `<p>✅ API-nøkkel er lagt inn på denne enheten.</p>
+             <button class="btn danger" data-action="remove-key">${icon('trash')} Fjern nøkkel</button>`
+          : `<p class="muted">Med en egen API-nøkkel lager appen ukessammendraget direkte. Uten nøkkel kan du bruke «Kopier til Claude-appen».</p>
+             <ol class="howto">
+               <li>Gå til <b>console.anthropic.com</b> og opprett en konto.</li>
+               <li>Under <b>Billing</b>: fyll på kreditt med kort, f.eks. 5 USD. Du kan også sette en grense for månedlig forbruk.</li>
+               <li>Under <b>API Keys</b>: trykk «Create Key», kopier nøkkelen og lim den inn her.</li>
+             </ol>
+             <div class="row">
+               <div class="field grow"><label for="apiKey">API-nøkkel</label><input id="apiKey" type="password" placeholder="sk-ant-…" autocomplete="off" spellcheck="false"></div>
+               <button class="btn primary" data-action="save-key">${icon('key')} Lagre nøkkel</button>
+             </div>`}
+        <p class="muted small">Nøkkelen lagres bare på denne enheten og tas ikke med i sikkerhetskopien. Når du lager et sammendrag, sendes notatteksten (ikke bildene) til Anthropic. Hvert sammendrag koster under 1 kr.</p>
       </div>
 
       <div class="card">
@@ -350,14 +530,100 @@ const VIEWS = {
 };
 
 /* ------------------------------------------------------------------ */
+/* Uke: data, liste og sammendrag                                      */
+/* ------------------------------------------------------------------ */
+
+/** Alle registreringer i uka, per skip, kronologisk. */
+async function weekData(start) {
+  const days = weekDays(start);
+  return Promise.all(state.settings.ships.map(async (s) => {
+    const perDay = await Promise.all(days.map((d) => entriesFor(s.id, d)));
+    const entries = perDay.flat().sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time) || (a.createdAt || 0) - (b.createdAt || 0));
+    return { ship: s, entries, photos: entries.reduce((n, e) => n + e.photoIds.length, 0) };
+  }));
+}
+
+function renderWeekFeed() {
+  const box = $('#weekFeed');
+  if (!box || !state.weekCache) return;
+  const q = state.weekQuery.trim().toLowerCase();
+  const words = q.split(/\s+/).filter(Boolean);
+  const list = state.weekCache
+    .filter((s) => state.weekShip === 'all' || s.ship.id === state.weekShip)
+    .flatMap((s) => s.entries)
+    .filter((e) => {
+      if (!words.length) return true;
+      const hay = `${e.text} ${fmtLoc(e.location)}`.toLowerCase();
+      return words.every((w) => hay.includes(w));
+    })
+    .sort((a, b) => (b.date + b.time).localeCompare(a.date + a.time));
+  if (!list.length) {
+    box.innerHTML = `<p class="muted">${words.length ? 'Ingen treff.' : 'Ingen registreringer denne uka.'}</p>`;
+    return;
+  }
+  let html = '';
+  let last = '';
+  for (const e of list) {
+    if (e.date !== last) { html += `<h3 class="feed-day">${cap(fmtLong(e.date))}</h3>`; last = e.date; }
+    html += entryCard(e, { showShip: state.weekShip === 'all' });
+  }
+  box.innerHTML = `<div class="list">${html}</div>`;
+  hydrateThumbs(box);
+}
+
+const weekLabel = (start) => `Week ${isoWeek(start)} (${fmtNum(start)} - ${fmtNum(addDays(start, 6))})`;
+
+async function currentWeekNotes() {
+  const data = state.weekCache || await weekData(state.weekStart);
+  const total = data.reduce((n, s) => n + s.entries.length, 0);
+  const text = summary.buildNotes(weekLabel(state.weekStart), data.map((s) => ({ name: s.ship.name, hull: s.ship.hull, entries: s.entries })));
+  return { text, total };
+}
+
+const saveSummaryText = debounce((start, text) => db.put('meta', { key: `summary:${start}`, text, updatedAt: Date.now() }), 400);
+
+function debounce(fn, ms) {
+  let t;
+  return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
+}
+
+async function generateAiSummary() {
+  if (state.aiBusy) return;
+  if (!summary.getApiKey()) {
+    toast('Legg inn API-nøkkel først');
+    state.view = 'settings';
+    render();
+    return;
+  }
+  const { text, total } = await currentWeekNotes();
+  if (!total) { toast('Ingen registreringer denne uka'); return; }
+  const box = $('#summaryText');
+  if (box?.value.trim() && !confirm('Erstatte teksten som står i sammendraget nå?')) return;
+  const start = state.weekStart;
+  state.aiBusy = true;
+  render();
+  try {
+    const result = await summary.summarizeWithClaude(text);
+    await db.put('meta', { key: `summary:${start}`, text: result, updatedAt: Date.now() });
+    toast('Sammendraget er klart');
+  } catch (err) {
+    console.error(err);
+    alert(err.message);
+  } finally {
+    state.aiBusy = false;
+    if (state.view === 'week') render();
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /* Redigering av registrering                                          */
 /* ------------------------------------------------------------------ */
 
 const editorEl = () => $('#editor');
 
 /** Tidligere brukte verdier per stedsfelt (til forslag), og sist brukte sted. */
-async function locationHints() {
-  const all = (await db.getAllBy('entries', 'shipId', ship().id)).map(normalize);
+async function locationHints(shipId = ship().id) {
+  const all = (await db.getAllBy('entries', 'shipId', shipId)).map(normalize);
   const hints = {};
   LOC_FIELDS.forEach((f) => {
     const set = new Set(all.map((e) => e.location?.[f.key]).filter(Boolean));
@@ -386,7 +652,7 @@ async function openEditor(entry, opts = {}) {
   const photos = order.filter((id) => byId.has(id) && !removed.includes(id)).map((id) => byId.get(id));
 
   state.draft = { entry: e, isNew: opts.restore ? opts.restore.isNew : isNew, photos, removed, added, dirty: !!opts.restore };
-  renderEditor(await locationHints());
+  renderEditor(await locationHints(e.shipId));
   const dlg = editorEl();
   if (!dlg.open) dlg.showModal();
   $('.ed-body', dlg).scrollTop = 0;
@@ -665,10 +931,55 @@ async function requestPersist() {
 const openCamera = () => $('#quickCamera').click();
 
 const ACTIONS = {
-  nav: (el) => { state.view = el.dataset.view; window.scrollTo(0, 0); render(); },
+  nav: (el, ev) => { ev?.preventDefault?.(); state.view = el.dataset.view; window.scrollTo(0, 0); render(); },
   'switch-ship': async (el) => { state.settings.activeShip = el.dataset.ship; await saveSettings(); render(); },
   'day-step': (el) => { const d = addDays(state.date, Number(el.dataset.step)); if (d <= today()) { state.date = d; render(); } },
   'goto-today': () => { state.date = today(); render(); },
+  'week-step': (el) => {
+    const s = addDays(state.weekStart, Number(el.dataset.step));
+    if (s <= mondayOf(today())) { state.weekStart = s; render(); }
+  },
+  'week-ship': (el) => {
+    state.weekShip = el.dataset.ship;
+    $$('[data-action=week-ship]').forEach((b) => b.classList.toggle('on', b === el));
+    renderWeekFeed();
+  },
+  'open-day': async (el, ev) => {
+    ev.preventDefault();
+    state.settings.activeShip = el.dataset.ship;
+    await saveSettings();
+    state.date = el.dataset.date;
+    state.view = 'day';
+    render();
+  },
+  'ai-summary': () => generateAiSummary(),
+  'copy-for-claude': async () => {
+    const { text, total } = await currentWeekNotes();
+    if (!total) { toast('Ingen registreringer denne uka'); return; }
+    if (await copyText(summary.promptForChat(text))) {
+      alert('Notatene er kopiert.\n\n1. Åpne Claude-appen og lim inn i en ny samtale.\n2. Kopier svaret fra Claude.\n3. Lim det inn i sammendragsfeltet her (eller rett i Marine Manager).');
+    } else {
+      toast('Kunne ikke kopiere');
+    }
+  },
+  'copy-summary': async () => {
+    const t = $('#summaryText')?.value.trim();
+    if (!t) { toast('Sammendraget er tomt'); return; }
+    toast(await copyText(t) ? 'Kopiert – lim inn i Marine Manager' : 'Kunne ikke kopiere');
+  },
+  'save-key': () => {
+    const v = $('#apiKey')?.value.trim();
+    if (!v) { toast('Lim inn nøkkelen først'); return; }
+    if (!v.startsWith('sk-ant-')) { toast('Nøkkelen skal starte med «sk-ant-»'); return; }
+    summary.setApiKey(v);
+    toast('Nøkkel lagret');
+    render();
+  },
+  'remove-key': () => {
+    if (!confirm('Fjerne API-nøkkelen fra denne enheten?')) return;
+    summary.setApiKey('');
+    render();
+  },
   'new-entry': () => openEditor(null),
   'quick-photo': () => openCamera(),
   edit: async (el) => { const e = await db.get('entries', el.dataset.id); if (e) openEditor(e); },
@@ -716,6 +1027,7 @@ const ACTIONS = {
   'view-photo': async (el) => {
     const i = Number(el.dataset.index);
     if (el.dataset.draft) return openLightbox(state.draft.photos.map((p) => p.id), i);
+    if (el.dataset.week) return openLightbox(state.weekPhotoOrder, i);
     const e = await db.get('entries', el.dataset.entry);
     if (e) openLightbox(e.photoIds, i);
   },
@@ -775,7 +1087,10 @@ function bindEvents() {
   });
 
   document.addEventListener('input', (ev) => {
-    if (ev.target.closest('[data-editor]')) saveDraftLocal();
+    const el = ev.target;
+    if (el.closest('[data-editor]')) saveDraftLocal();
+    if (el.dataset.input === 'summary') saveSummaryText(state.weekStart, el.value);
+    if (el.dataset.input === 'week-query') { state.weekQuery = el.value; renderWeekFeed(); }
   });
 
   // «Ta bilde» fra hovedskjermen → ny registrering med bildet
@@ -823,6 +1138,7 @@ function bindEvents() {
     const t = today();
     if (t !== lastToday) {
       if (state.date === lastToday) state.date = t;
+      if (state.weekStart === mondayOf(lastToday)) state.weekStart = mondayOf(t);
       lastToday = t;
       if (!editorEl().open) render();
     }
@@ -835,6 +1151,7 @@ function bindEvents() {
 
 async function init() {
   await loadSettings();
+  if (isDesktop()) state.view = 'week'; // PC: start på ukeoversikten
   bindEvents();
   await render();
 

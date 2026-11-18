@@ -73,7 +73,7 @@ sikkerhetskopi til fil (OneDrive er sikkerhetskopien). Dette kan tas inn igjen s
 | 3 | Registrere appen hos Microsoft (guide følger, ca. 10 min) | Bruker |
 | 4 | OneDrive: innlogging, opplastingskø, mappestruktur | Claude |
 | 5 | Word-dagbok per dag | Claude |
-| 6 | Ukessammendrag med Claude og kopier-knapp | Claude |
+| 6 | Ukessammendrag (AI + «Kopier til Claude-appen») og PC-ukeoversikt ✅ | Claude |
 | 7 | Opprette Anthropic-konto og API-nøkkel (guide følger) | Bruker |
 | 8 | Prøve på iPhone i en uke og justere | Bruker + Claude |
 
