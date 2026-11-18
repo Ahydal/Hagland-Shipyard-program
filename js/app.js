@@ -2,7 +2,7 @@ import * as db from './db.js';
 import * as summary from './summary.js';
 import * as sync from './sync.js';
 
-const APP_VERSION = '2.3.0';
+const APP_VERSION = '2.4.0';
 
 /* ------------------------------------------------------------------ */
 /* Konstanter                                                          */
@@ -48,6 +48,10 @@ const ICON_PATHS = {
   cloud: '<path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/>',
   folder: '<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>',
   refresh: '<polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.5 9a9 9 0 0 1 14.9-3.4L23 10M1 14l4.6 4.4A9 9 0 0 0 20.5 15"/>',
+  users: '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+  report: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>',
+  minus: '<line x1="5" y1="12" x2="19" y2="12"/>',
+  plus: '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>',
   key: '<circle cx="7.5" cy="15.5" r="5.5"/><path d="M21 2l-9.6 9.6"/><path d="M15.5 7.5l3 3L22 7l-3-3"/>',
 };
 const icon = (name, cls = '') => `<svg class="ico ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICON_PATHS[name] || ''}</svg>`;
@@ -265,12 +269,13 @@ function renderTopbar() {
     <nav class="tabs desktop-only">
       <button class="${state.view === 'week' ? 'on' : ''}" data-action="nav" data-view="week">${icon('calendar')} Uke</button>
       <button class="${state.view === 'day' ? 'on' : ''}" data-action="nav" data-view="day">${icon('camera')} Dagbok</button>
+      <button class="${state.view === 'dayreport' ? 'on' : ''}" data-action="nav" data-view="dayreport">${icon('report')} Dagsrapport</button>
     </nav>`;
   const gear = `<button class="icon-btn" data-action="nav" data-view="settings" aria-label="Innstillinger">${icon('gear')}</button>`;
-  if (state.view === 'week') {
+  if (state.view === 'week' || state.view === 'dayreport') {
     $('#topbar').innerHTML = `
       <button class="icon-btn mobile-only" data-action="nav" data-view="day" aria-label="Tilbake">${icon('left')}</button>
-      <h1 class="topbar-title mobile-only">Ukessammendrag</h1>
+      <h1 class="topbar-title mobile-only">${state.view === 'week' ? 'Ukessammendrag' : 'Dagsrapport'}</h1>
       ${tabs}
       <span class="spacer"></span>
       ${gear}`;
@@ -299,7 +304,7 @@ async function render() {
   const html = await VIEWS[state.view]();
   if (token !== renderToken) return;
   const main = $('#main');
-  main.classList.toggle('wide', state.view === 'week');
+  main.classList.toggle('wide', state.view === 'week' || state.view === 'dayreport');
   main.innerHTML = html;
   hydrateThumbs(main);
   if (state.view === 'week') renderWeekFeed();
@@ -350,7 +355,12 @@ const VIEWS = {
         <button class="btn big" data-action="new-entry">${icon('pen')} Skriv notat</button>
       </div>
 
-      ${entries.length ? `<p class="muted small daystats">${entries.length} ${entries.length === 1 ? 'registrering' : 'registreringer'} · ${nPhotos} ${nPhotos === 1 ? 'bilde' : 'bilder'}</p>` : ''}
+      ${crewBar(ship(), await getCrew(ship().id, state.date))}
+
+      <div class="daystats-row">
+        <p class="muted small daystats">${entries.length ? `${entries.length} ${entries.length === 1 ? 'registrering' : 'registreringer'} · ${nPhotos} ${nPhotos === 1 ? 'bilde' : 'bilder'}` : ''}</p>
+        <button class="btn small ghost" data-action="nav" data-view="dayreport">${icon('report')} Dagsrapport</button>
+      </div>
 
       <div class="list">
         ${entries.length ? entries.map(entryCard).join('') : `
@@ -409,11 +419,11 @@ const VIEWS = {
             <h2>${icon('sparkle')} Ukessammendrag til Marine Manager</h2>
             <p class="muted small">På engelsk · begge skip · ${total} ${total === 1 ? 'registrering' : 'registreringer'} denne uka</p>
             <div class="row">
-              <button class="btn primary" data-action="ai-summary" ${state.aiBusy ? 'disabled' : ''}>${icon('sparkle')} ${state.aiBusy ? 'Lager sammendrag …' : 'Lag med AI'}</button>
-              <button class="btn" data-action="copy-for-claude">${icon('copy')} Kopier til Claude-appen</button>
+              <button class="btn primary" data-action="ai-summary" data-kind="week" ${state.aiBusy ? 'disabled' : ''}>${icon('sparkle')} ${state.aiBusy ? 'Lager sammendrag …' : 'Lag med AI'}</button>
+              <button class="btn" data-action="copy-for-claude" data-kind="week">${icon('copy')} Kopier til Claude-appen</button>
             </div>
             ${hasKey ? '' : `<p class="muted small">«Lag med AI» krever en API-nøkkel (<a href="#" data-action="nav" data-view="settings">Innstillinger</a>). Uten nøkkel: trykk «Kopier til Claude-appen», lim inn i Claude-appen, og lim svaret inn her.</p>`}
-            <textarea id="summaryText" rows="12" data-input="summary" placeholder="Sammendraget kommer her. Du kan rette teksten før du kopierer.">${esc(saved)}</textarea>
+            <textarea id="summaryText" rows="12" data-input="summary" data-key="summary:${start}" placeholder="Sammendraget kommer her. Du kan rette teksten før du kopierer.">${esc(saved)}</textarea>
             <button class="btn big primary-outline" data-action="copy-summary">${icon('copy')} Kopier sammendrag</button>
           </div>
 
@@ -458,6 +468,55 @@ const VIEWS = {
               <img data-photo="${p.id}" data-action="view-photo" data-week="1" data-index="${i}" alt="" loading="lazy" title="${esc(fmtLoc(p.e.location))}">`).join('')}
             </div>
           </div>` : ''}
+        </div>
+      </div>
+    </section>`;
+  },
+
+  async dayreport() {
+    const date = state.date;
+    const isToday = date === today();
+    const ships = await Promise.all(state.settings.ships.map(async (sh) => ({
+      sh,
+      crew: await getCrew(sh.id, date),
+      entries: (await entriesFor(sh.id, date)).sort((a, b) => (b.time || '').localeCompare(a.time || '')),
+    })));
+    const saved = (await db.get('meta', `dsummary:${date}`))?.text || '';
+    const hasKey = !!summary.getApiKey();
+    const nEntries = ships.reduce((n, x) => n + x.entries.length, 0);
+    return `
+    <section class="view">
+      <div class="daybar">
+        <button class="icon-btn" data-action="day-step" data-step="-1" aria-label="Forrige dag">${icon('left')}</button>
+        <label class="daypick">
+          <span class="daypick-label">${isToday ? 'I dag' : 'Dagsrapport'}</span>
+          <span class="daypick-date">${cap(fmtLong(date))}</span>
+          <input type="date" value="${date}" max="${today()}" data-change="pick-date" aria-label="Velg dato">
+        </label>
+        <button class="icon-btn" data-action="day-step" data-step="1" aria-label="Neste dag" ${isToday ? 'disabled' : ''}>${icon('right')}</button>
+      </div>
+
+      <div class="week-grid">
+        <aside class="week-side">
+          <div class="card summary-card">
+            <h2>${icon('report')} Dagsrapport til Marine Manager</h2>
+            <p class="muted small">På engelsk · begge skip · ${nEntries} ${nEntries === 1 ? 'registrering' : 'registreringer'} · bemanning tas med</p>
+            <div class="row">
+              <button class="btn primary" data-action="ai-summary" data-kind="day" ${state.aiBusy ? 'disabled' : ''}>${icon('sparkle')} ${state.aiBusy ? 'Lager rapport …' : 'Lag med AI'}</button>
+              <button class="btn" data-action="copy-for-claude" data-kind="day">${icon('copy')} Kopier til Claude-appen</button>
+            </div>
+            ${hasKey ? '' : `<p class="muted small">«Lag med AI» krever en API-nøkkel (<a href="#" data-action="nav" data-view="settings">Innstillinger</a>). Uten nøkkel: «Kopier til Claude-appen», lim inn i Claude, og lim svaret inn her.</p>`}
+            <textarea id="summaryText" rows="12" data-input="summary" data-key="dsummary:${date}" placeholder="Dagsrapporten kommer her. Du kan rette teksten før du kopierer.">${esc(saved)}</textarea>
+            <button class="btn big primary-outline" data-action="copy-summary">${icon('copy')} Kopier dagsrapport</button>
+          </div>
+          ${ships.map((x) => crewTable(x.sh, x.crew)).join('')}
+        </aside>
+
+        <div class="week-main desktop-only">
+          ${ships.map((x) => `<div class="card">
+            <h2>${esc(x.sh.name)} <span class="muted small">(${x.entries.length})</span></h2>
+            ${x.entries.length ? `<div class="list">${x.entries.map((e) => entryCard(e)).join('')}</div>` : '<p class="muted">Ingen registreringer.</p>'}
+          </div>`).join('')}
         </div>
       </div>
     </section>`;
@@ -542,6 +601,107 @@ const VIEWS = {
 };
 
 /* ------------------------------------------------------------------ */
+/* Bemanning (personell per underleverandør, per skip og dag)          */
+/* ------------------------------------------------------------------ */
+
+const crewKey = (shipId, date) => `crew:${shipId}:${date}`;
+const getCrew = (shipId, date) => db.get('meta', crewKey(shipId, date));
+const crewRows = (c) => (c?.rows || []).filter((r) => r.company || Number(r.count));
+const crewTotal = (c) => crewRows(c).reduce((n, r) => n + (Number(r.count) || 0), 0);
+
+async function allCrewFor(shipId) {
+  return (await db.getAll('meta')).filter((m) => String(m.key).startsWith(`crew:${shipId}:`));
+}
+
+/** Firmanavn brukt før (alle skip), mest brukte først. */
+async function knownCompanies() {
+  const n = new Map();
+  (await db.getAll('meta')).filter((m) => String(m.key).startsWith('crew:'))
+    .forEach((c) => crewRows(c).forEach((r) => r.company && n.set(r.company, (n.get(r.company) || 0) + 1)));
+  return [...n.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'nb')).map(([c]) => c);
+}
+
+function crewBar(sh, crew) {
+  const rows = crewRows(crew);
+  return `<button class="crewbar" data-action="edit-crew" data-ship="${sh.id}">
+    ${icon('users')}
+    <span class="crewbar-text"><b>Bemanning</b>
+      <small>${rows.length ? esc(rows.map((r) => `${r.company || '?'} ${Number(r.count) || 0}`).join(' · ')) : 'Ikke registrert – trykk for å legge inn'}</small></span>
+    <b class="crewbar-total">${rows.length ? crewTotal(crew) : '–'}</b>
+  </button>`;
+}
+
+function crewTable(sh, crew) {
+  const rows = crewRows(crew);
+  return `<div class="card">
+    <div class="feed-head"><h2>${icon('users')} Bemanning – ${esc(sh.name)}</h2>
+      <button class="btn small" data-action="edit-crew" data-ship="${sh.id}">${icon('pen')} ${rows.length ? 'Endre' : 'Legg inn'}</button></div>
+    ${rows.length ? `<table class="crew-table">
+      ${rows.map((r) => `<tr><td>${esc(r.company || '–')}</td><td>${Number(r.count) || 0}</td></tr>`).join('')}
+      <tr class="sum"><td>Totalt</td><td>${crewTotal(crew)}</td></tr></table>`
+      : '<p class="muted">Ikke registrert.</p>'}
+  </div>`;
+}
+
+const crewRowHtml = (r = { company: '', count: '' }) => `
+  <div class="crew-row">
+    <input class="crew-company" list="dl-companies" value="${esc(r.company)}" placeholder="Firma" autocomplete="off">
+    <div class="stepper">
+      <button type="button" class="icon-btn" data-action="crew-step" data-step="-1" aria-label="Færre">${icon('minus')}</button>
+      <input class="crew-count" type="number" inputmode="numeric" min="0" step="1" value="${r.count === '' ? '' : Number(r.count) || 0}" placeholder="0">
+      <button type="button" class="icon-btn" data-action="crew-step" data-step="1" aria-label="Flere">${icon('plus')}</button>
+    </div>
+    <button type="button" class="icon-btn crew-del" data-action="crew-del" aria-label="Fjern">${icon('x')}</button>
+  </div>`;
+
+async function openCrewSheet(shipId) {
+  const sh = state.settings.ships.find((s) => s.id === shipId) || ship();
+  const date = state.date;
+  const crew = await getCrew(sh.id, date);
+  const prev = (await allCrewFor(sh.id)).filter((c) => c.date < date && crewRows(c).length).sort((a, b) => b.date.localeCompare(a.date))[0];
+  const companies = await knownCompanies();
+  const rows = crewRows(crew);
+  state.crewEdit = { shipId: sh.id, date, prev };
+  const dlg = $('#sheet');
+  dlg.innerHTML = `
+    <div class="sheet crew-sheet">
+      <h2>${icon('users')} Bemanning – ${esc(sh.name)}</h2>
+      <p class="muted">${cap(fmtLong(date))}</p>
+      ${prev && !rows.length ? `<button class="chip" data-action="crew-prev">Samme som ${fmtNum(prev.date)} (${crewTotal(prev)} personer)</button>` : ''}
+      <div id="crewRows">${(rows.length ? rows : [{ company: '', count: '' }]).map(crewRowHtml).join('')}</div>
+      <datalist id="dl-companies">${companies.map((c) => `<option value="${esc(c)}">`).join('')}</datalist>
+      <button class="btn small" data-action="crew-add">${icon('plus')} Legg til firma</button>
+      <p class="crew-total">Totalt om bord: <b id="crewTotal">0</b></p>
+      <div class="row">
+        <button class="btn ghost" data-action="close-sheet">Avbryt</button>
+        <button class="btn primary grow-btn" data-action="crew-save">Lagre</button>
+      </div>
+    </div>`;
+  updateCrewTotal();
+  if (!dlg.open) dlg.showModal();
+}
+
+function updateCrewTotal() {
+  const el = $('#crewTotal');
+  if (el) el.textContent = $$('#crewRows .crew-count').reduce((n, i) => n + (Number(i.value) || 0), 0);
+}
+
+async function saveCrew() {
+  const ed = state.crewEdit;
+  if (!ed) return;
+  const rows = $$('#crewRows .crew-row').map((r) => ({
+    company: $('.crew-company', r).value.trim(),
+    count: Math.max(0, Math.round(Number($('.crew-count', r).value) || 0)),
+  })).filter((r) => r.company || r.count);
+  await db.put('meta', { key: crewKey(ed.shipId, ed.date), shipId: ed.shipId, date: ed.date, rows, updatedAt: Date.now() });
+  state.crewEdit = null;
+  $('#sheet').close();
+  toast(rows.length ? `Bemanning lagret: ${rows.reduce((n, r) => n + r.count, 0)} personer` : 'Bemanning fjernet');
+  afterLocalChange();
+  render();
+}
+
+/* ------------------------------------------------------------------ */
 /* Uke: data, liste og sammendrag                                      */
 /* ------------------------------------------------------------------ */
 
@@ -586,20 +746,50 @@ function renderWeekFeed() {
 const weekLabel = (start) => `Week ${isoWeek(start)} (${fmtNum(start)} - ${fmtNum(addDays(start, 6))})`;
 
 async function currentWeekNotes() {
-  const data = state.weekCache || await weekData(state.weekStart);
+  const data = await weekData(state.weekStart);
+  const days = weekDays(state.weekStart);
   const total = data.reduce((n, s) => n + s.entries.length, 0);
-  const text = summary.buildNotes(weekLabel(state.weekStart), data.map((s) => ({ name: s.ship.name, hull: s.ship.hull, entries: s.entries })));
-  return { text, total };
+  const ships = [];
+  for (const s of data) {
+    const totals = (await Promise.all(days.map((d) => getCrew(s.ship.id, d)))).map(crewTotal).filter((n) => n > 0);
+    const manpower = totals.length
+      ? `Manpower: average ${Math.round(totals.reduce((a, b) => a + b, 0) / totals.length)} persons/day (range ${Math.min(...totals)}-${Math.max(...totals)}, ${totals.length} ${totals.length === 1 ? 'day' : 'days'} recorded)`
+      : '';
+    ships.push({ name: s.ship.name, hull: s.ship.hull, entries: s.entries, manpower });
+  }
+  return { text: summary.buildNotes(weekLabel(state.weekStart), ships), total: total + ships.filter((x) => x.manpower).length };
 }
 
-const saveSummaryText = debounce((start, text) => db.put('meta', { key: `summary:${start}`, text, updatedAt: Date.now() }), 400);
+async function currentDayNotes() {
+  const date = state.date;
+  const ships = [];
+  let total = 0;
+  for (const sh of state.settings.ships) {
+    const entries = (await entriesFor(sh.id, date)).sort((a, b) => (a.time || '').localeCompare(b.time || ''));
+    const crew = await getCrew(sh.id, date);
+    const rows = crewRows(crew);
+    const manpower = rows.length
+      ? `Manpower: ${crewTotal(crew)} (${rows.map((r) => `${r.company || 'Unknown'} ${Number(r.count) || 0}`).join(', ')})`
+      : 'Manpower: not recorded';
+    total += entries.length + rows.length;
+    ships.push({ name: sh.name, hull: sh.hull, entries, manpower });
+  }
+  const d = parseISODate(date);
+  const label = `Daily report ${d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}`;
+  return { text: summary.buildNotes(label, ships), total };
+}
+
+const notesFor = (kind) => (kind === 'day' ? currentDayNotes() : currentWeekNotes());
+const summaryKey = (kind) => (kind === 'day' ? `dsummary:${state.date}` : `summary:${state.weekStart}`);
+
+const saveSummaryText = debounce((key, text) => db.put('meta', { key, text, updatedAt: Date.now() }), 400);
 
 function debounce(fn, ms) {
   let t;
   return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
 }
 
-async function generateAiSummary() {
+async function generateAiSummary(kind = 'week') {
   if (state.aiBusy) return;
   if (!summary.getApiKey()) {
     toast('Legg inn API-nøkkel først');
@@ -607,23 +797,23 @@ async function generateAiSummary() {
     render();
     return;
   }
-  const { text, total } = await currentWeekNotes();
-  if (!total) { toast('Ingen registreringer denne uka'); return; }
+  const { text, total } = await notesFor(kind);
+  if (!total) { toast(kind === 'day' ? 'Ingenting registrert denne dagen' : 'Ingen registreringer denne uka'); return; }
   const box = $('#summaryText');
-  if (box?.value.trim() && !confirm('Erstatte teksten som står i sammendraget nå?')) return;
-  const start = state.weekStart;
+  if (box?.value.trim() && !confirm('Erstatte teksten som står i feltet nå?')) return;
+  const key = summaryKey(kind);
   state.aiBusy = true;
   render();
   try {
-    const result = await summary.summarizeWithClaude(text);
-    await db.put('meta', { key: `summary:${start}`, text: result, updatedAt: Date.now() });
-    toast('Sammendraget er klart');
+    const result = await summary.summarizeWithClaude(text, kind);
+    await db.put('meta', { key, text: result, updatedAt: Date.now() });
+    toast(kind === 'day' ? 'Dagsrapporten er klar' : 'Sammendraget er klart');
   } catch (err) {
     console.error(err);
     alert(err.message);
   } finally {
     state.aiBusy = false;
-    if (state.view === 'week') render();
+    if (state.view === 'week' || state.view === 'dayreport') render();
   }
 }
 
@@ -1112,8 +1302,31 @@ const ACTIONS = {
     state.view = 'day';
     render();
   },
-  'ai-summary': () => generateAiSummary(),
+  'ai-summary': (el) => generateAiSummary(el.dataset.kind),
   'send-onedrive': () => prepareSend(),
+  'edit-crew': (el) => openCrewSheet(el.dataset.ship),
+  'crew-add': () => {
+    $('#crewRows').insertAdjacentHTML('beforeend', crewRowHtml());
+    $('#crewRows .crew-row:last-child .crew-company').focus();
+  },
+  'crew-del': (el) => {
+    el.closest('.crew-row').remove();
+    if (!$('#crewRows .crew-row')) $('#crewRows').insertAdjacentHTML('beforeend', crewRowHtml());
+    updateCrewTotal();
+  },
+  'crew-step': (el) => {
+    const input = $('.crew-count', el.closest('.crew-row'));
+    input.value = Math.max(0, (Number(input.value) || 0) + Number(el.dataset.step));
+    updateCrewTotal();
+  },
+  'crew-prev': (el) => {
+    const prev = state.crewEdit?.prev;
+    if (!prev) return;
+    $('#crewRows').innerHTML = crewRows(prev).map(crewRowHtml).join('');
+    el.remove();
+    updateCrewTotal();
+  },
+  'crew-save': () => saveCrew(),
   'share-bundle': () => shareBundle(),
   'close-sheet': () => { preparedBundle = null; $('#sheet').close(); },
   'resend-all': async () => {
@@ -1138,10 +1351,11 @@ const ACTIONS = {
     runSync();
   },
   'sync-now': () => runSync(),
-  'copy-for-claude': async () => {
-    const { text, total } = await currentWeekNotes();
-    if (!total) { toast('Ingen registreringer denne uka'); return; }
-    if (await copyText(summary.promptForChat(text))) {
+  'copy-for-claude': async (el) => {
+    const kind = el.dataset.kind || 'week';
+    const { text, total } = await notesFor(kind);
+    if (!total) { toast(kind === 'day' ? 'Ingenting registrert denne dagen' : 'Ingen registreringer denne uka'); return; }
+    if (await copyText(summary.promptForChat(text, kind))) {
       alert('Notatene er kopiert.\n\n1. Åpne Claude-appen og lim inn i en ny samtale.\n2. Kopier svaret fra Claude.\n3. Lim det inn i sammendragsfeltet her (eller rett i Marine Manager).');
     } else {
       toast('Kunne ikke kopiere');
@@ -1277,7 +1491,8 @@ function bindEvents() {
   document.addEventListener('input', (ev) => {
     const el = ev.target;
     if (el.closest('[data-editor]')) saveDraftLocal();
-    if (el.dataset.input === 'summary') saveSummaryText(state.weekStart, el.value);
+    if (el.dataset.input === 'summary') saveSummaryText(el.dataset.key, el.value);
+    if (el.classList.contains('crew-count')) updateCrewTotal();
     if (el.dataset.input === 'week-query') { state.weekQuery = el.value; renderWeekFeed(); }
   });
 

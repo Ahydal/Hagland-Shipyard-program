@@ -26,6 +26,12 @@ lager ukessammendrag til Marine Manager.
 **På PC:** når appen er åpen, henter den inn sendingene automatisk. Bilder og Word-dagbok havner i
 `Tilsynsdagbok\<skip>\<dato>\`. Startsiden viser ukeoversikten.
 
+**Bemanning:** trykk på **«Bemanning»** i dagboken og legg inn firma og antall personer om bord, med − / +.
+«Samme som …» kopierer forrige dag. Bemanningen sendes med til PC-en og kommer med i Word-dagboken.
+
+**Dagsrapport:** trykk **«Dagsrapport»** i dagboken (fanen «Dagsrapport» på PC). Trykk **«Lag med AI»** eller **«Kopier til Claude-appen»**,
+og så **«Kopier dagsrapport»**. Rapporten er på engelsk, med begge skip og bemanningen.
+
 **Ukesrapport:** åpne ukeoversikten (kalender-ikonet på iPhone) og trykk **«Lag med AI»** eller **«Kopier til Claude-appen»**. Trykk så **«Kopier sammendrag»** og lim inn i Marine Manager.
 
 Se [PLAN.md](PLAN.md) for detaljer og videre planer.
