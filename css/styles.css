@@ -289,3 +289,21 @@ dialog::backdrop { background: rgba(2, 6, 23, .55); }
 
 .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 6px; }
 .gallery img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 8px; background: var(--surface-2); cursor: zoom-in; }
+
+/* ---------- OneDrive ---------- */
+.sendbar {
+  display: flex; align-items: center; gap: 10px; width: 100%; padding: 12px 14px; cursor: pointer; text-align: left;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line)); border-radius: var(--radius);
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface)); color: var(--text);
+}
+.sendbar span { flex: 1; }
+.sendbar .sendbar-go { color: var(--navy-2); }
+@media (prefers-color-scheme: dark) { .sendbar .sendbar-go { color: #7dd3fc; } }
+.sync-line { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.sync-line .ico { width: 17px; height: 17px; }
+.error { color: var(--danger); margin: 0; }
+.sheet-dialog { width: min(480px, 100vw); max-width: 100vw; margin: auto auto 0; border-radius: 18px 18px 0 0; background: var(--surface); }
+@media (min-width: 760px) { .sheet-dialog { margin: auto; border-radius: 18px; } }
+.sheet { padding: 20px 20px calc(20px + var(--safe-b)); display: flex; flex-direction: column; gap: 12px; }
+.sheet h2 { display: flex; align-items: center; gap: 8px; }
+.sheet p { margin: 0; }

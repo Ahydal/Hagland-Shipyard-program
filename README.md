@@ -1,28 +1,33 @@
 # Tilsynsdagbok
 
-En enkel app for byggetilsyn på nybygg. Du går rundt om bord, **tar bilder og skriver korte notater**
-om det som skjer, og registrerer hvor om bord det var (seksjon, spant, dekk og rom).
+En enkel app for byggetilsyn på nybygg. Du går rundt om bord, **tar bilder og skriver korte notater**,
+og registrerer hvor om bord det var (seksjon, spant, dekk og rom). Alt havner sortert i OneDrive, og appen
+lager ukessammendrag til Marine Manager.
 
-Appen er laget for iPhone, og fungerer også på PC. Se [PLAN.md](PLAN.md) for hva som kommer:
-synk til OneDrive, Word-dagbok per dag og ukessammendrag til Marine Manager.
+**App:** https://ahydal.github.io/Hagland-Shipyard-program/ (bruk store bokstaver i adressen som vist)
 
-## Slik brukes den
+## Kom i gang
 
-1. Velg skip øverst (Nybygg 1 / Nybygg 2).
-2. Trykk **«Ta bilde»**, ta bildet, skriv et par ord og fyll ut sted om bord. Notat og sted kan hoppes over.
-3. Trykk **«Lagre»**, eller **«Lagre og ta neste bilde»** for å fortsette rett til kameraet.
-4. **«Skriv notat»** lager en registrering uten bilde.
-5. Trykk på en registrering for å rette eller slette den. Pilene øverst blar mellom dager.
+1. **PC (Chrome eller Edge):**
+   - Åpne appen og installer den med ikonet i adressefeltet.
+   - Lag mappa `OneDrive\Tilsynsdagbok` i Utforsker.
+   - Trykk **«Velg OneDrive-mappe»** i appen og velg den mappa. Appen lager da `Innboks`.
+2. **iPhone (Safari):**
+   - Åpne appen, trykk Del-knappen og velg **«Legg til på Hjem-skjerm»**.
+   - Installer også OneDrive-appen og logg inn, hvis du ikke har den.
 
-**Detaljer som er nyttige å vite:**
-- Stedsfeltene foreslår verdier du har brukt før. «Samme som sist» fyller inn forrige sted.
-- Appen virker uten nett. Alt lagres på telefonen.
-- Ulagrede registreringer gjenopprettes hvis telefonen lukker appen mens kameraet er åpent.
+## Daglig bruk
 
-## Status
+**På iPhone:**
+1. Velg skip og trykk **«Ta bilde»**. Skriv et par ord og fyll ut sted, og trykk **«Lagre»** (eller **«Lagre og ta neste bilde»**).
+2. Når det passer, for eksempel på slutten av dagen: trykk **«Send til OneDrive»** → **«Åpne del-meny»** → **«Arkiver i Filer»** → **OneDrive → Tilsynsdagbok → Innboks**. iPhone husker mappa.
 
-Steg 1 av planen er ferdig. Inntil OneDrive er koblet til, ligger dataene **bare på enheten**.
-Bruk Innstillinger → *Eksporter* for sikkerhetskopi.
+**På PC:** når appen er åpen, henter den inn sendingene automatisk. Bilder og Word-dagbok havner i
+`Tilsynsdagbok\<skip>\<dato>\`. Startsiden viser ukeoversikten.
+
+**Ukesrapport:** åpne ukeoversikten (kalender-ikonet på iPhone) og trykk **«Lag med AI»** eller **«Kopier til Claude-appen»**. Trykk så **«Kopier sammendrag»** og lim inn i Marine Manager.
+
+Se [PLAN.md](PLAN.md) for detaljer og videre planer.
 
 ## Kjøre lokalt
 
@@ -31,17 +36,17 @@ python3 -m http.server 8000
 # åpne http://localhost:8000
 ```
 
-Kamera, installasjon og bruk uten nett krever at appen åpnes via `https://` (eller `localhost`).
-
 ## Teknisk
 
-Ren HTML/CSS/JavaScript uten byggesteg.
+Ren HTML/CSS/JavaScript uten byggesteg. Eksterne biblioteker lastes fra jsDelivr bare når de trengs:
+`docx` lager Word-filene på PC, og `@anthropic-ai/sdk` brukes til AI-sammendraget.
 
 | Fil | Innhold |
 | --- | --- |
 | `index.html` | Rammeverk |
-| `js/app.js` | Visninger, registrering, bilder, sikkerhetskopi |
+| `js/app.js` | Visninger: dagbok, uke/dashbord, innstillinger, registrering |
 | `js/db.js` | Lokal lagring (IndexedDB) |
+| `js/sync.js` | OneDrive: pakkefil fra iPhone, mappe-synk og Word-dagbok på PC |
+| `js/summary.js` | Ukessammendrag (Claude API / kopier til Claude-appen) |
 | `css/styles.css` | Utseende (mobil og PC) |
 | `sw.js` | Bruk uten nett. **Øk `CACHE`-versjonen når filer endres.** |
-| `manifest.webmanifest`, `icons/` | Installasjon som app |

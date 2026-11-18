@@ -1,7 +1,8 @@
 import * as db from './db.js';
 import * as summary from './summary.js';
+import * as sync from './sync.js';
 
-const APP_VERSION = '2.1.0';
+const APP_VERSION = '2.2.0';
 
 /* ------------------------------------------------------------------ */
 /* Konstanter                                                          */
@@ -44,6 +45,9 @@ const ICON_PATHS = {
   calendar: '<rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>',
   sparkle: '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9z"/>',
   copy: '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+  cloud: '<path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/>',
+  folder: '<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>',
+  refresh: '<polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.5 9a9 9 0 0 1 14.9-3.4L23 10M1 14l4.6 4.4A9 9 0 0 0 20.5 15"/>',
   key: '<circle cx="7.5" cy="15.5" r="5.5"/><path d="M21 2l-9.6 9.6"/><path d="M15.5 7.5l3 3L22 7l-3-3"/>',
 };
 const icon = (name, cls = '') => `<svg class="ico ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICON_PATHS[name] || ''}</svg>`;
@@ -162,6 +166,8 @@ const state = {
   weekQuery: '',
   weekPhotoOrder: [],
   aiBusy: false,
+  pending: 0,
+  sync: { root: null, perm: null, running: false, msg: '', lastAt: 0, error: '' },
 };
 
 const ship = () => state.settings.ships.find((s) => s.id === state.settings.activeShip) || state.settings.ships[0];
@@ -319,6 +325,7 @@ function entryCard(e, { showShip = false } = {}) {
 
 const VIEWS = {
   async day() {
+    if (!sync.canUseFolder()) state.pending = await sync.pendingCount();
     const entries = (await entriesFor(ship().id, state.date))
       .sort((a, b) => (b.time || '').localeCompare(a.time || '') || (b.createdAt || 0) - (a.createdAt || 0));
     const isToday = state.date === today();
@@ -335,6 +342,8 @@ const VIEWS = {
         <button class="icon-btn" data-action="day-step" data-step="1" aria-label="Neste dag" ${isToday ? 'disabled' : ''}>${icon('right')}</button>
       </div>
       ${isToday ? '' : `<button class="btn small ghost back-today" data-action="goto-today">${icon('history')} Tilbake til i dag</button>`}
+
+      ${!sync.canUseFolder() && state.pending ? `<button class="sendbar" data-action="send-onedrive">${icon('cloud')}<span><b>${state.pending}</b> ${state.pending === 1 ? 'endring' : 'endringer'} ikke sendt til OneDrive</span><b class="sendbar-go">Send</b></button>` : ''}
 
       <div class="quick">
         <button class="btn primary big" data-action="quick-photo">${icon('camera')} Ta bilde</button>
@@ -395,6 +404,7 @@ const VIEWS = {
 
       <div class="week-grid">
         <aside class="week-side">
+          ${sync.canUseFolder() ? oneDriveCard() : ''}
           <div class="card summary-card">
             <h2>${icon('sparkle')} Ukessammendrag til Marine Manager</h2>
             <p class="muted small">På engelsk · begge skip · ${total} ${total === 1 ? 'registrering' : 'registreringer'} denne uka</p>
@@ -499,9 +509,11 @@ const VIEWS = {
         <p class="muted small">Nøkkelen lagres bare på denne enheten og tas ikke med i sikkerhetskopien. Når du lager et sammendrag, sendes notatteksten (ikke bildene) til Anthropic. Hvert sammendrag koster under 1 kr.</p>
       </div>
 
+      ${sync.canUseFolder() ? oneDriveCard(true) : await iphoneOneDriveCard()}
+
       <div class="card">
         <h2>Sikkerhetskopi</h2>
-        <p class="muted">Inntil OneDrive er koblet til, ligger alt bare på denne enheten. Ta gjerne en kopi innimellom.</p>
+        <p class="muted">Ekstra kopi av alt på denne enheten, som én fil.</p>
         <div class="row">
           <button class="btn" data-action="export">${icon('download')} Eksporter</button>
           <label class="btn">${icon('upload')} Importer<input type="file" accept="application/json,.json" data-change="import" hidden></label>
@@ -613,6 +625,155 @@ async function generateAiSummary() {
     state.aiBusy = false;
     if (state.view === 'week') render();
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* OneDrive                                                            */
+/* ------------------------------------------------------------------ */
+
+const fmtLocShort = (loc) => fmtLoc(loc).replace(/\./g, '').replace(/ · /g, ' ');
+
+function fmtWhen(ts) {
+  if (!ts) return 'aldri';
+  const d = new Date(ts);
+  return d.toDateString() === new Date().toDateString() ? `i dag kl. ${hhmm(d)}` : `${d.toLocaleDateString('nb-NO')} kl. ${hhmm(d)}`;
+}
+
+/** PC: status og knapper for OneDrive-mappa. */
+function oneDriveCard(inSettings = false) {
+  const s = state.sync;
+  let body;
+  if (!s.root) {
+    body = `<p class="muted">Velg OneDrive-mappa på denne PC-en, f.eks. <b>OneDrive\\Tilsynsdagbok</b> (lag mappa i Utforsker først).
+      Appen legger bilder og Word-dagbøker der, sortert per skip og dag, og henter inn det du sender fra iPhone.</p>
+      <button class="btn primary" data-action="pick-folder">${icon('folder')} Velg OneDrive-mappe</button>`;
+  } else if (s.perm !== 'granted') {
+    body = `<p>${icon('folder')} <b>${esc(s.root.name)}</b></p>
+      <p class="muted">Nettleseren vil at du bekrefter tilgangen til mappa.</p>
+      <button class="btn primary" data-action="connect-folder">${icon('folder')} Koble til «${esc(s.root.name)}»</button>`;
+  } else {
+    body = `<p class="sync-line">${icon('folder')} <b>${esc(s.root.name)}</b> · ${s.running ? esc(s.msg || 'Synkroniserer …') : `synkronisert ${fmtWhen(s.lastAt)}`}</p>
+      ${s.error ? `<p class="error">${esc(s.error)}</p>` : ''}
+      <div class="row">
+        <button class="btn" data-action="sync-now" ${s.running ? 'disabled' : ''}>${icon('refresh')} Synkroniser nå</button>
+        ${inSettings ? '<button class="btn ghost" data-action="pick-folder">Bytt mappe</button>' : ''}
+      </div>`;
+  }
+  return `<div class="card onedrive-card" id="oneDriveCard" data-settings="${inSettings ? 1 : 0}">
+    <h2>${icon('cloud')} OneDrive</h2>${body}
+    ${inSettings ? `<p class="muted small">Fra iPhone: «Send til OneDrive» → «Arkiver i Filer» → <b>${esc(s.root?.name || 'Tilsynsdagbok')} → Innboks</b>.
+      Appen her henter det inn automatisk når den er åpen (sjekker hvert 2. minutt).</p>` : ''}
+  </div>`;
+}
+
+function refreshSyncCard() {
+  const el = $('#oneDriveCard');
+  if (el) el.outerHTML = oneDriveCard(el.dataset.settings === '1');
+}
+
+/** iPhone: status og forklaring. */
+async function iphoneOneDriveCard() {
+  const pending = await sync.pendingCount();
+  const last = (await db.get('meta', 'lastSent'))?.at;
+  return `<div class="card">
+    <h2>${icon('cloud')} OneDrive</h2>
+    <p>${pending ? `<b>${pending}</b> ${pending === 1 ? 'endring er' : 'endringer er'} ikke sendt.` : '✅ Alt er sendt.'} <span class="muted">Sist sendt ${fmtWhen(last)}.</span></p>
+    <button class="btn primary" data-action="send-onedrive" ${pending ? '' : 'disabled'}>${icon('cloud')} Send til OneDrive</button>
+    <ol class="howto">
+      <li>Trykk «Send til OneDrive» og så «Åpne del-meny».</li>
+      <li>Velg <b>«Arkiver i Filer»</b> → <b>OneDrive</b> → <b>Tilsynsdagbok</b> → <b>Innboks</b> → «Arkiver». iPhone husker mappa til neste gang.</li>
+      <li>PC-appen henter inn og sorterer alt automatisk når den er åpen.</li>
+    </ol>
+    <p class="muted small">Krever OneDrive-appen på iPhone, og at mappa er valgt i PC-appen først (da lages Innboks-mappa).</p>
+    <button class="btn small ghost" data-action="resend-all">Send alt på nytt neste gang</button>
+  </div>`;
+}
+
+let preparedBundle = null;
+
+/** iPhone steg 1: pakk (kan ta litt tid). Steg 2 (eget trykk): åpne del-menyen. */
+async function prepareSend() {
+  toast('Pakker …');
+  preparedBundle = await sync.buildBundle(state.settings);
+  if (!preparedBundle.count) { toast('Alt er allerede sendt'); return; }
+  const mb = (preparedBundle.blob.size / 1048576).toLocaleString('nb-NO', { maximumFractionDigits: 1 });
+  const dlg = $('#sheet');
+  dlg.innerHTML = `
+    <div class="sheet">
+      <h2>${icon('cloud')} Send til OneDrive</h2>
+      <p><b>${preparedBundle.count}</b> ${preparedBundle.count === 1 ? 'endring' : 'endringer'} er klar til sending (${mb} MB).</p>
+      <ol class="howto">
+        <li>Trykk «Åpne del-meny».</li>
+        <li>Velg <b>«Arkiver i Filer»</b>.</li>
+        <li>Velg <b>OneDrive → Tilsynsdagbok → Innboks</b> og trykk «Arkiver».</li>
+      </ol>
+      <button class="btn primary big" data-action="share-bundle">${icon('cloud')} Åpne del-meny</button>
+      <button class="btn ghost" data-action="close-sheet">Avbryt</button>
+    </div>`;
+  if (!dlg.open) dlg.showModal();
+}
+
+async function shareBundle() {
+  if (!preparedBundle) return;
+  try {
+    if (!(await sync.shareBundle(preparedBundle))) return; // avbrutt – prøv igjen
+    await sync.markSent(preparedBundle);
+    preparedBundle = null;
+    $('#sheet').close();
+    toast('Sendt til OneDrive');
+    render();
+  } catch (err) {
+    console.error(err);
+    alert(`Deling mislyktes: ${err.message}`);
+  }
+}
+
+/** PC: les Innboks og skriv ut endrede dager. */
+async function runSync({ quiet = false } = {}) {
+  const s = state.sync;
+  if (!s.root || s.perm !== 'granted' || s.running) return;
+  s.running = true;
+  s.error = '';
+  s.msg = 'Synkroniserer …';
+  refreshSyncCard();
+  try {
+    const shipsBefore = JSON.stringify(state.settings.ships);
+    const res = await sync.syncFolder(state.settings, {
+      fmtLoc, fmtLocShort, fmtLong: (d) => cap(fmtLong(d)),
+      onProgress: (m) => { s.msg = m; refreshSyncCard(); },
+    });
+    if (JSON.stringify(state.settings.ships) !== shipsBefore) await saveSettings();
+    s.lastAt = Date.now();
+    if (res.imported) {
+      toast(`Hentet ${res.imported} ${res.imported === 1 ? 'sending' : 'sendinger'} fra iPhone`);
+      if (!editorEl().open && !document.activeElement?.matches('textarea, input')) render();
+    } else if (!quiet) {
+      toast(res.days ? `Oppdaterte ${res.days} ${res.days === 1 ? 'dag' : 'dager'} i OneDrive` : 'Alt er oppdatert');
+    }
+  } catch (err) {
+    console.error(err);
+    s.error = err.message;
+    s.perm = await sync.permission(s.root).catch(() => 'prompt');
+  } finally {
+    s.running = false;
+    s.msg = '';
+    refreshSyncCard();
+  }
+}
+
+let syncTimer;
+const afterLocalChange = () => { clearTimeout(syncTimer); syncTimer = setTimeout(() => runSync({ quiet: true }), 3000); };
+
+async function initSync() {
+  if (!sync.canUseFolder()) return;
+  const s = state.sync;
+  s.root = await sync.getRoot();
+  s.lastAt = (await db.get('meta', 'lastSync'))?.at || 0;
+  if (s.root) s.perm = await sync.permission(s.root).catch(() => 'prompt');
+  refreshSyncCard();
+  runSync({ quiet: true });
+  setInterval(() => { if (document.visibilityState === 'visible') runSync({ quiet: true }); }, 120000);
+  window.addEventListener('focus', () => runSync({ quiet: true }));
 }
 
 /* ------------------------------------------------------------------ */
@@ -799,6 +960,7 @@ async function saveEntry({ quiet = false } = {}) {
   if (state.view === 'day' && e.date !== state.date) state.date = e.date;
   if (!quiet) toast('Lagret');
   requestPersist();
+  afterLocalChange();
   render();
   return true;
 }
@@ -901,17 +1063,10 @@ async function importBackup(file) {
   let data;
   try { data = JSON.parse(await file.text()); } catch { toast('Ugyldig fil'); return; }
   if (data?.app !== 'tilsynsdagbok') { toast('Filen er ikke en sikkerhetskopi fra Tilsynsdagbok'); return; }
-  const existing = new Map((await db.getAll('entries')).map((e) => [e.id, e]));
-  const entries = (data.entries || []).filter((e) => !existing.has(e.id) || (e.updatedAt || 0) > (existing.get(e.id).updatedAt || 0));
-  if (!confirm(`Importere ${data.entries?.length || 0} registreringer og ${data.photos?.length || 0} bilder?\n${entries.length} er nye eller oppdaterte. Ingenting blir slettet.`)) return;
-  const photos = (data.photos || []).map((p) => ({ ...p, blob: b64ToBlob(p.blob), thumb: p.thumb ? b64ToBlob(p.thumb) : null }));
-  await db.putMany('entries', entries);
-  for (let i = 0; i < photos.length; i += 20) await db.putMany('photos', photos.slice(i, i + 20));
-  const imported = (data.meta || []).find((m) => m.key === 'settings')?.value;
-  if (imported?.ships) {
-    imported.ships.forEach((s) => { if (!state.settings.ships.some((x) => x.id === s.id)) state.settings.ships.push(s); });
-    await saveSettings();
-  }
+  if (!confirm(`Importere ${data.entries?.length || 0} registreringer og ${data.photos?.length || 0} bilder?\nNyeste versjon av hver registrering beholdes.`)) return;
+  if (!data.settings) data.settings = (data.meta || []).find((m) => m.key === 'settings')?.value;
+  await sync.applyBundle(data, state.settings);
+  await saveSettings();
   thumbUrls.forEach((u) => URL.revokeObjectURL(u));
   thumbUrls.clear();
   toast('Import fullført');
@@ -953,6 +1108,31 @@ const ACTIONS = {
     render();
   },
   'ai-summary': () => generateAiSummary(),
+  'send-onedrive': () => prepareSend(),
+  'share-bundle': () => shareBundle(),
+  'close-sheet': () => { preparedBundle = null; $('#sheet').close(); },
+  'resend-all': async () => {
+    if (!confirm('Merke alle registreringer som ikke sendt? Neste sending tar da med alt (PC-en hopper over det den allerede har).')) return;
+    const all = await db.getAll('entries');
+    await db.putMany('entries', all.map(({ sentAt, ...e }) => e));
+    render();
+  },
+  'pick-folder': async () => {
+    try {
+      state.sync.root = await sync.pickRoot();
+      state.sync.perm = 'granted';
+      refreshSyncCard();
+      runSync();
+    } catch (err) {
+      if (err.name !== 'AbortError') alert(`Kunne ikke bruke mappa: ${err.message}`);
+    }
+  },
+  'connect-folder': async () => {
+    state.sync.perm = await sync.permission(state.sync.root, true);
+    refreshSyncCard();
+    runSync();
+  },
+  'sync-now': () => runSync(),
   'copy-for-claude': async () => {
     const { text, total } = await currentWeekNotes();
     if (!total) { toast('Ingen registreringer denne uka'); return; }
@@ -1016,12 +1196,14 @@ const ACTIONS = {
   'delete-entry': async () => {
     if (!confirm('Slette registreringen og bildene i den? Dette kan ikke angres.')) return;
     const d = state.draft;
+    await sync.addTombstone(await db.get('entries', d.entry.id));
     await db.deleteEntry(d.entry.id);
     d.photos.forEach((p) => forgetThumb(p.id));
     clearDraftLocal();
     state.draft = null;
     editorEl().close();
     toast('Slettet');
+    afterLocalChange();
     render();
   },
   'view-photo': async (el) => {
@@ -1082,6 +1264,7 @@ function bindEvents() {
     if (el.dataset.change && CHANGES[el.dataset.change]) CHANGES[el.dataset.change](el);
     if (el.dataset.shipField) {
       state.settings.ships[Number(el.dataset.i)][el.dataset.shipField] = el.value.trim();
+      state.settings.shipsUpdatedAt = Date.now();
       saveSettings().then(() => toast('Lagret'));
     }
   });
@@ -1165,6 +1348,8 @@ async function init() {
     await openEditor(existing, { restore: draft });
     toast('Ulagret registrering ble gjenopprettet');
   }
+
+  initSync();
 
   // Rydd bort bilder som ikke hører til noen registrering
   db.orphanPhotoIds(state.draft?.entry.id).then((ids) => ids.length && db.delMany('photos', ids)).catch(() => {});
