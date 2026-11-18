@@ -47,6 +47,12 @@ inn i ukesrapporten i Marine Manager.
 - **«Kopier til Claude-appen»**: kopierer instruks og notater, som limes inn i Claude-appen. Ingen nøkkel trengs.
 - Teksten kan rettes, og **«Kopier sammendrag»** gjør den klar til å limes inn i MM.
 
+### Bemanning og dagsrapport ✅
+- **Bemanning** per skip og dag: firma (husker tidligere firma) og antall personer om bord. «Samme som forrige dag» kopierer fra dagen før.
+- Bemanningen sendes til PC-en, kommer med i Word-dagboken, og gir snitt per dag i ukessammendraget.
+- **Dagsrapport** til Marine Manager: på engelsk, begge skip, med en «Manpower»-linje og korte punkter.
+  Lages med AI eller via Claude-appen, på samme måte som ukessammendraget.
+
 ## Hvorfor ikke automatisk OneDrive-opplasting fra iPhone?
 Automatisk opplasting krever at appen registreres i Microsoft Azure. Det krever igjen en Azure-konto med
 abonnement, som en privat Microsoft-konto ikke har. Løsningen over virker uten Azure, uten innlogging

@@ -52,9 +52,13 @@ export async function addTombstone(entry) {
   await db.put('meta', { key: 'tombstones', list });
 }
 
+const isCrew = (m) => String(m.key).startsWith('crew:');
+export const allCrew = async () => (await db.getAll('meta')).filter(isCrew);
+
 export async function pendingCount() {
   const entries = await db.getAll('entries');
-  return entries.filter(isUnsent).length + (await getTombstones()).length;
+  const crew = (await allCrew()).filter(isUnsent);
+  return entries.filter(isUnsent).length + crew.length + (await getTombstones()).length;
 }
 
 /** Lager pakkefil med alt som ikke er sendt. */
@@ -62,11 +66,13 @@ export async function buildBundle(settings) {
   const createdAt = Date.now();
   const entries = (await db.getAll('entries')).filter(isUnsent);
   const tombstones = await getTombstones();
+  const crew = (await allCrew()).filter(isUnsent);
   const parts = [
     `{"app":"tilsynsdagbok","version":3,"kind":"send","createdAt":${createdAt},`,
     `"settings":${JSON.stringify({ ships: settings.ships, shipsUpdatedAt: settings.shipsUpdatedAt || 0 })},`,
     `"entries":${JSON.stringify(entries.map(({ sentAt, ...e }) => e))},`,
-    `"tombstones":${JSON.stringify(tombstones)},"photos":[`,
+    `"tombstones":${JSON.stringify(tombstones)},`,
+    `"crew":${JSON.stringify(crew.map(({ sentAt, ...c }) => c))},"photos":[`,
   ];
   let first = true;
   for (const e of entries) {
@@ -88,7 +94,8 @@ export async function buildBundle(settings) {
     createdAt,
     entryIds: entries.map((e) => e.id),
     tombstoneIds: tombstones.map((t) => t.id),
-    count: entries.length + tombstones.length,
+    crewKeys: crew.map((c) => c.key),
+    count: entries.length + tombstones.length + crew.length,
   };
 }
 
@@ -100,6 +107,12 @@ export async function markSent(bundle) {
     if (e && (e.updatedAt || 0) <= bundle.createdAt) updated.push({ ...e, sentAt: bundle.createdAt });
   }
   if (updated.length) await db.putMany('entries', updated);
+  const crew = [];
+  for (const key of bundle.crewKeys || []) {
+    const c = await db.get('meta', key);
+    if (c && (c.updatedAt || 0) <= bundle.createdAt) crew.push({ ...c, sentAt: bundle.createdAt });
+  }
+  if (crew.length) await db.putMany('meta', crew);
   const left = (await getTombstones()).filter((t) => !bundle.tombstoneIds.includes(t.id));
   await db.put('meta', { key: 'tombstones', list: left });
   await db.put('meta', { key: 'lastSent', at: bundle.createdAt });
@@ -156,6 +169,15 @@ export async function applyBundle(data, settings) {
   const photos = (data.photos || []).filter((p) => accepted.has(p.entryId) || !data.kind)
     .map((p) => ({ ...p, blob: b64ToBlob(p.blob), thumb: p.thumb ? b64ToBlob(p.thumb) : null }));
   for (let i = 0; i < photos.length; i += 20) await db.putMany('photos', photos.slice(i, i + 20));
+
+  for (const c of data.crew || []) {
+    if (!isCrew(c)) continue;
+    const cur = await db.get('meta', c.key);
+    if (cur && (cur.updatedAt || 0) > (c.updatedAt || 0)) continue;
+    const { sentAt, ...clean } = c;
+    await db.put('meta', clean);
+    changed++;
+  }
 
   for (const t of data.tombstones || []) {
     const cur = await db.get('entries', t.id);
@@ -260,13 +282,30 @@ async function resizeForDoc(blob, max = 1280) {
   return { data: await out.arrayBuffer(), w, h };
 }
 
-async function buildDocx(ship, date, entries, photosById, fmtLoc, fmtLong) {
-  const { Document, Packer, Paragraph, TextRun, HeadingLevel, ImageRun } = await import(DOCX_URL);
+async function buildDocx(ship, date, entries, photosById, crew, fmtLoc, fmtLong) {
+  const { Document, Packer, Paragraph, TextRun, HeadingLevel, ImageRun, Table, TableRow, TableCell, WidthType } = await import(DOCX_URL);
   const children = [
     new Paragraph({ heading: HeadingLevel.TITLE, children: [new TextRun(`Dagbok – ${ship.name}${ship.hull ? ` (${ship.hull})` : ''}`)] }),
     new Paragraph({ children: [new TextRun({ text: fmtLong(date), italics: true })] }),
-    new Paragraph({ children: [new TextRun({ text: `${entries.length} registreringer`, color: '666666' })] }),
+    new Paragraph({ children: [new TextRun({ text: `${entries.length} ${entries.length === 1 ? 'registrering' : 'registreringer'}`, color: '666666' })] }),
   ];
+  const rows = (crew?.rows || []).filter((r) => r.company || r.count);
+  if (rows.length) {
+    const total = rows.reduce((n, r) => n + (Number(r.count) || 0), 0);
+    const cell = (text, bold = false) => new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: String(text), bold })] })] });
+    children.push(
+      new Paragraph({ heading: HeadingLevel.HEADING_1, spacing: { before: 240 }, children: [new TextRun(`Bemanning om bord: ${total}`)] }),
+      new Table({
+        width: { size: 60, type: WidthType.PERCENTAGE },
+        rows: [
+          new TableRow({ children: [cell('Firma', true), cell('Antall', true)] }),
+          ...rows.map((r) => new TableRow({ children: [cell(r.company || '–'), cell(Number(r.count) || 0)] })),
+          new TableRow({ children: [cell('Totalt', true), cell(total, true)] }),
+        ],
+      }),
+    );
+  }
+  if (entries.length) children.push(new Paragraph({ heading: HeadingLevel.HEADING_1, spacing: { before: 240 }, children: [new TextRun('Registreringer')] }));
   for (const e of entries) {
     const loc = fmtLoc(e.location);
     children.push(new Paragraph({
@@ -294,14 +333,15 @@ async function buildDocx(ship, date, entries, photosById, fmtLoc, fmtLong) {
   return Packer.toBlob(doc);
 }
 
-const daySig = (shipName, entries) => shipName + '|' + entries.map((e) => `${e.id}:${e.updatedAt || 0}`).sort().join(',');
+const daySig = (shipName, entries, crew) => shipName + '|' + entries.map((e) => `${e.id}:${e.updatedAt || 0}`).sort().join(',') + `|crew:${crew?.updatedAt || 0}`;
 
 /** Skriver mappa for én dag: bilder + Word-dagbok. Fjerner filer som ikke lenger hører til. */
-async function writeDay(root, ship, date, entries, prev, h) {
+async function writeDay(root, ship, date, entries, crew, prev, h) {
   const shipFolder = safeName(ship.name);
   const files = {}; // filnavn -> photoId | 'docx'
   const photos = new Map();
-  if (entries.length) {
+  const hasContent = entries.length || crew?.rows?.length;
+  if (hasContent) {
     const shipDir = await root.getDirectoryHandle(shipFolder, { create: true });
     const dayDir = await shipDir.getDirectoryHandle(date, { create: true });
     for (const e of entries) {
@@ -320,7 +360,7 @@ async function writeDay(root, ship, date, entries, prev, h) {
     }
     const docName = safeName(`Dagbok ${ship.name} ${date}`) + '.docx';
     files[docName] = 'docx';
-    await writeFile(dayDir, docName, await buildDocx(ship, date, entries, photos, h.fmtLoc, h.fmtLong));
+    await writeFile(dayDir, docName, await buildDocx(ship, date, entries, photos, crew, h.fmtLoc, h.fmtLong));
   }
   // Rydd bort filer fra forrige gang som ikke lenger skal være der
   if (prev?.files) {
@@ -330,7 +370,7 @@ async function writeDay(root, ship, date, entries, prev, h) {
       for (const name of Object.keys(prev.files)) {
         if (prev.folder !== shipFolder || !(name in files)) await removeQuiet(oldDay, name);
       }
-      if (!entries.length || prev.folder !== shipFolder) await removeQuiet(oldShip, date); // bare hvis tom
+      if (!hasContent || prev.folder !== shipFolder) await removeQuiet(oldShip, date); // bare hvis tom
     } catch { /* mappa finnes ikke lenger */ }
   }
   return { folder: shipFolder, files };
@@ -355,7 +395,14 @@ export async function syncFolder(settings, h) {
     if (!groups.has(k)) groups.set(k, []);
     groups.get(k).push(e);
   }
-  const outRecs = (await db.getAll('meta')).filter((m) => m.key.startsWith('out:'));
+  const meta = await db.getAll('meta');
+  const crewByKey = new Map();
+  meta.filter(isCrew).forEach((c) => {
+    const k = `${c.shipId}|${c.date}`;
+    crewByKey.set(k, c);
+    if (!groups.has(k)) groups.set(k, []);
+  });
+  const outRecs = meta.filter((m) => m.key.startsWith('out:'));
   outRecs.forEach((m) => { const k = m.key.slice(4); if (!groups.has(k)) groups.set(k, []); });
   const prevByKey = new Map(outRecs.map((m) => [m.key.slice(4), m]));
 
@@ -367,12 +414,13 @@ export async function syncFolder(settings, h) {
     const [shipId, date] = k.split('|');
     const ship = settings.ships.find((s) => s.id === shipId) || { id: shipId, name: shipId, hull: '' };
     list.sort((a, b) => (a.time || '').localeCompare(b.time || '') || (a.createdAt || 0) - (b.createdAt || 0));
-    const sig = daySig(ship.name, list);
+    const crew = crewByKey.get(k) || null;
+    const sig = daySig(ship.name, list, crew);
     const prev = prevByKey.get(k);
     if (prev?.sig === sig) continue;
     h.onProgress?.(`Skriver ${ship.name} ${date} (${n}/${total}) …`);
-    const res = await writeDay(root, ship, date, list, prev, h);
-    if (list.length) await db.put('meta', { key: `out:${k}`, sig, ...res, at: Date.now() });
+    const res = await writeDay(root, ship, date, list, crew, prev, h);
+    if (list.length || crew?.rows?.length) await db.put('meta', { key: `out:${k}`, sig, ...res, at: Date.now() });
     else await db.del('meta', `out:${k}`);
     days++;
   }

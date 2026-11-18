@@ -1,4 +1,4 @@
-// Ukessammendrag til Marine Manager.
+// Ukessammendrag og dagsrapport til Marine Manager.
 // A) Direkte med Claude via Anthropic API (egen API-nøkkel, lagres kun på enheten).
 // B) «Kopier til Claude-appen»: instruks + notater kopieres og limes inn i Claude-appen.
 
@@ -6,7 +6,7 @@ const SDK_URL = 'https://cdn.jsdelivr.net/npm/@anthropic-ai/sdk@1.4.0/+esm';
 const MODEL = 'claude-opus-5-5';
 const KEY_STORAGE = 'tilsyn-anthropic-key';
 
-export const INSTRUCTIONS = `You help a site supervisor (owner's representative) at a shipyard write the weekly report for newbuildings.
+const WEEK_INSTRUCTIONS = `You help a site supervisor (owner's representative) at a shipyard write the weekly report for newbuildings.
 You receive the supervisor's short field notes for one week, mostly written in Norwegian. Each note has a date, a time and, when given, a location on board (section, frame, deck, room).
 
 Write a short weekly summary in English, to be pasted into the weekly report in Marine Manager.
@@ -17,8 +17,25 @@ Rules:
 - Where the notes support it, cover: main work and progress; notable observations, deviations or quality issues; meetings and decisions; open items to follow up.
 - Merge related notes instead of listing every note. Keep each bullet short, ideally one line.
 - Use correct English shipbuilding terminology. Mention the location (e.g. "section 210, frame 42") only when it adds value.
+- If a "Manpower" line is given for a vessel, include it once as the first bullet, using the figures exactly as given.
 - Do not add facts, numbers or judgements that are not in the notes. If a vessel has no notes, write "- No notes recorded this week."
 - Output only the summary, with no introduction or closing remarks.`;
+
+const DAY_INSTRUCTIONS = `You help a site supervisor (owner's representative) at a shipyard write the daily report for newbuildings.
+You receive the supervisor's short field notes for one day, mostly written in Norwegian, and the manpower on board per subcontractor. Each note has a time and, when given, a location on board (section, frame, deck, room).
+
+Write a short daily report in English, to be pasted into Marine Manager.
+
+Rules:
+- Plain text only. No markdown: no #, no **, no tables. Use "- " for bullets.
+- One block per vessel: the vessel name on its own line, then a line "Manpower: <total> (<company> <number>, ...)" copied exactly from the manpower given (or "Manpower: not recorded"), then 2-6 bullets.
+- Where the notes support it, cover: work carried out and progress; notable observations, deviations or quality issues; meetings and decisions; items to follow up.
+- Merge related notes instead of listing every note. Keep each bullet short, ideally one line.
+- Use correct English shipbuilding terminology. Mention the location (e.g. "section 210, frame 42") only when it adds value.
+- Do not add facts, numbers or judgements that are not in the notes. If a vessel has no notes, write "- No notes recorded."
+- Output only the report, with no introduction or closing remarks.`;
+
+const INSTRUCTIONS = { week: WEEK_INSTRUCTIONS, day: DAY_INSTRUCTIONS };
 
 /* ---------- API-nøkkel ---------- */
 
@@ -49,12 +66,13 @@ function locEn(loc) {
 /**
  * Lager en ren tekstversjon av ukas notater for alle skip.
  * @param {string} weekLabel f.eks. "Week 47 (16.11.2026 - 22.11.2026)"
- * @param {{name:string, hull:string, entries:object[]}[]} ships entries sortert kronologisk
+ * @param {{name:string, hull:string, entries:object[], manpower?:string}[]} ships entries sortert kronologisk
  */
 export function buildNotes(weekLabel, ships) {
   const out = [weekLabel, ''];
   for (const s of ships) {
     out.push(`=== ${s.name}${s.hull ? ` (${s.hull})` : ''} ===`);
+    if (s.manpower) out.push(s.manpower);
     if (!s.entries.length) { out.push('(no notes)', ''); continue; }
     let lastDate = '';
     for (const e of s.entries) {
@@ -76,8 +94,8 @@ export function buildNotes(weekLabel, ships) {
   return out.join('\n').trim();
 }
 
-/** Tekst som limes inn i Claude-appen (variant B). */
-export const promptForChat = (notes) => `${INSTRUCTIONS}\n\nHere are the notes:\n\n${notes}`;
+/** Tekst som limes inn i Claude-appen (variant B). kind: 'week' | 'day' */
+export const promptForChat = (notes, kind = 'week') => `${INSTRUCTIONS[kind]}\n\nHere are the notes:\n\n${notes}`;
 
 /* ---------- Variant A: Claude API ---------- */
 
@@ -96,7 +114,7 @@ function explainError(err, Anthropic) {
   return err?.message || String(err);
 }
 
-export async function summarizeWithClaude(notes) {
+export async function summarizeWithClaude(notes, kind = 'week') {
   const apiKey = getApiKey();
   if (!apiKey) throw new Error('Ingen API-nøkkel. Legg den inn under Innstillinger.');
 
@@ -116,7 +134,7 @@ export async function summarizeWithClaude(notes) {
       max_tokens: 16000,
       betas: ['server-side-fallback-2026-07-01'],
       fallbacks: 'default',
-      system: INSTRUCTIONS,
+      system: INSTRUCTIONS[kind],
       messages: [{ role: 'user', content: notes }],
     });
   } catch (err) {
