@@ -22,6 +22,8 @@ Appen er på engelsk. Knappenavnene under er de du ser i appen.
 
 **På iPhone:**
 1. Velg skip og trykk **«Take photo»**. Velg eventuelt firma (knapper fra dagens bemanning), skriv et par ord og fyll ut sted, og trykk **«Save»** (eller **«Save and take next photo»**).
+   **Tekstforslag:** når du har tatt et bilde, kan du trykke **«Suggest text from photo»**. Claude foreslår en kort tekst ut fra bildet,
+   og bygger videre på stikkordene dine hvis du har skrevet noen. Velg **Use**, **Add to note** eller **Dismiss**. Krever API-nøkkel på iPhone.
 2. **Manpower:** trykk på linja og legg inn firma og antall personer om bord. «Same as …» kopierer forrige dag.
 3. **Send til PC:** trykk **«Send to OneDrive»** → **«Open share menu»** → **«Arkiver i Filer»** → OneDrive → app-mappa → **Inbox**.
 4. **Hent fra PC:** trykk **«Get from PC»** og velg `From PC/site-diary-from-pc.json` i OneDrive.
@@ -34,7 +36,7 @@ Appen er på engelsk. Knappenavnene under er de du ser i appen.
 
 **Rapporter til Marine Manager** (lages per skip, på engelsk):
 - **Daily report:** «Good afternoon», så «<Firma> – N people on board» med korte setninger, og til slutt signatur. Navn og stilling legger du inn under Settings → Reports.
-- **Weekly report** (fanen «Week»): tekst til «Description»-feltet i MM, og ferdig tittel, for eksempel «NB 853. Week 47 (Nov 16, 2026 - Nov 22, 2026)».
+- **Weekly report** (fanen «Week»): en kort, generell oppsummering av uka (ikke dag for dag) til «Description»-feltet i MM, og ferdig tittel, for eksempel «NB 853. Week 47 (Nov 16, 2026 - Nov 22, 2026)».
 - Trykk **«Write with AI»** (krever API-nøkkel) eller **«Copy for Claude app»**, og så **«Copy text»**.
 
 Se [PLAN.md](PLAN.md) for detaljer og videre planer.

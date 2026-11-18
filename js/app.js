@@ -2,7 +2,7 @@ import * as db from './db.js';
 import * as summary from './summary.js';
 import * as sync from './sync.js';
 
-const APP_VERSION = '3.0.0';
+const APP_VERSION = '3.1.0';
 
 /* ------------------------------------------------------------------ */
 /* Konstanter                                                          */
@@ -579,11 +579,11 @@ const VIEWS = {
       </div>
 
       <div class="card">
-        <h2>${icon('sparkle')} AI reports (optional)</h2>
+        <h2>${icon('sparkle')} AI (optional)</h2>
         ${summary.getApiKey()
           ? `<p>✅ An API key is saved on this device.</p>
              <button class="btn danger" data-action="remove-key">${icon('trash')} Remove key</button>`
-          : `<p class="muted">With your own API key the app writes the reports directly. Without a key, use “Copy for Claude app”.</p>
+          : `<p class="muted">With your own API key the app writes the reports directly and can suggest note text from your photos (“Suggest text from photo”). Add the key on each device where you want to use it, e.g. both iPhone and PC. Without a key, use “Copy for Claude app” for reports.</p>
              <ol class="howto">
                <li>Go to <b>console.anthropic.com</b> and create an account.</li>
                <li>Under <b>Billing</b>: add credit with a card, e.g. USD 5. You can also set a monthly spend limit.</li>
@@ -593,7 +593,7 @@ const VIEWS = {
                <div class="field grow"><label for="apiKey">API key</label><input id="apiKey" type="password" placeholder="sk-ant-…" autocomplete="off" spellcheck="false"></div>
                <button class="btn primary" data-action="save-key">${icon('key')} Save key</button>
              </div>`}
-        <p class="muted small">The key is stored only on this device and is not included in backups. When a report is written, the note text (not the photos) is sent to Anthropic. Each report costs less than USD 0.10.</p>
+        <p class="muted small">The key is stored only on this device and is not included in backups. Reports send the note text (not the photos) to Anthropic; text suggestions send the selected photos. A report or suggestion typically costs less than USD 0.10.</p>
       </div>
 
       ${sync.canUseFolder() ? oneDriveCard(true) : await iphoneOneDriveCard()}
@@ -1060,6 +1060,10 @@ function renderEditor({ hints, last, companies }) {
       <div class="field">
         <label for="f-text">Note</label>
         <textarea id="f-text" name="text" rows="4" placeholder="What is happening? e.g. “Main engine installation in progress. Foundation accepted.”">${esc(e.text)}</textarea>
+        <div class="suggest-row" id="suggestRow" hidden>
+          <button type="button" class="btn small" data-action="suggest-text">${icon('sparkle')} Suggest text from photo</button>
+        </div>
+        <div class="suggest-box" id="suggestBox" hidden></div>
       </div>
 
       <div class="field">
@@ -1109,6 +1113,8 @@ function renderEditorPhotos() {
       <button type="button" class="ed-photo-x" data-action="remove-photo" data-id="${p.id}" aria-label="Remove photo">${icon('x')}</button>
     </div>`).join('');
   box.hidden = d.photos.length === 0;
+  const row = $('#suggestRow');
+  if (row) row.hidden = d.photos.length === 0;
   hydrateThumbs(box);
 }
 
@@ -1210,6 +1216,62 @@ async function closeEditor() {
   const d = state.draft;
   if (d?.dirty && !confirm('Discard this entry/changes?')) return;
   await discardDraft();
+}
+
+/* ------------------------------------------------------------------ */
+/* Tekstforslag fra bilde (Claude)                                     */
+/* ------------------------------------------------------------------ */
+
+/** Skalerer bildet ned (maks 1024 px) og gir base64 for Claude. */
+async function photoForAi(blob) {
+  const bmp = await createImageBitmap(blob);
+  const scale = Math.min(1, 1024 / Math.max(bmp.width, bmp.height));
+  const c = document.createElement('canvas');
+  c.width = Math.round(bmp.width * scale);
+  c.height = Math.round(bmp.height * scale);
+  c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+  bmp.close?.();
+  return { mediaType: 'image/jpeg', data: c.toDataURL('image/jpeg', 0.8).split(',')[1] };
+}
+
+const SUGGEST_LABEL = `${icon('sparkle')} Suggest text from photo`;
+
+async function suggestText() {
+  const d = state.draft;
+  if (!d) return;
+  if (!d.photos.length) { toast('Take a photo first'); return; }
+  if (!summary.getApiKey()) {
+    alert('Text suggestions need an API key on this device. Add it under Settings → AI (optional).');
+    return;
+  }
+  collectDraft();
+  const btn = $('[data-action=suggest-text]');
+  btn.disabled = true;
+  btn.innerHTML = `${icon('sparkle')} Looking at the photo …`;
+  try {
+    const images = [];
+    for (const p of d.photos.slice(-3)) images.push(await photoForAi(p.blob));
+    const sh = state.settings.ships.find((x) => x.id === d.entry.shipId);
+    const text = await summary.suggestFromPhotos(images, {
+      vessel: sh?.name, company: d.entry.company, location: fmtLoc(d.entry.location), draft: d.entry.text.trim(),
+    });
+    if (state.draft !== d) return; // redigeringen ble lukket i mellomtiden
+    state.suggestion = text;
+    const box = $('#suggestBox');
+    box.innerHTML = `
+      <p class="suggestion-text">${icon('sparkle')} ${esc(text)}</p>
+      <div class="row">
+        <button type="button" class="btn small primary" data-action="use-suggestion" data-mode="replace">Use</button>
+        ${d.entry.text.trim() ? '<button type="button" class="btn small" data-action="use-suggestion" data-mode="append">Add to note</button>' : ''}
+        <button type="button" class="btn small ghost" data-action="use-suggestion" data-mode="dismiss">Dismiss</button>
+      </div>`;
+    box.hidden = false;
+  } catch (err) {
+    console.error(err);
+    alert(err.message);
+  } finally {
+    if (btn.isConnected) { btn.disabled = false; btn.innerHTML = SUGGEST_LABEL; }
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -1427,6 +1489,16 @@ const ACTIONS = {
   'quick-photo': () => openCamera(),
   edit: async (el) => { const e = await db.get('entries', el.dataset.id); if (e) openEditor(e); },
   'save-entry': () => saveEntry(),
+  'suggest-text': () => suggestText(),
+  'use-suggestion': (el) => {
+    const ta = $('#f-text');
+    const t = state.suggestion || '';
+    if (el.dataset.mode === 'replace') ta.value = t;
+    if (el.dataset.mode === 'append') ta.value = ta.value.trim() ? `${ta.value.trim()}\n${t}` : t;
+    $('#suggestBox').hidden = true;
+    state.suggestion = null;
+    saveDraftLocal();
+  },
   'save-and-photo': async () => {
     // Kameraet må åpnes direkte i trykket (krav i Safari). Lagringen skjer i mellomtiden.
     const d = state.draft;

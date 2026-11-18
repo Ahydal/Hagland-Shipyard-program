@@ -347,3 +347,10 @@ dialog::backdrop { background: rgba(2, 6, 23, .55); }
 .daystats-row { flex-wrap: wrap; }
 .daystats-row .daystats { white-space: nowrap; }
 .daystats-actions { margin-left: auto; flex-wrap: nowrap; }
+
+/* ---------- Tekstforslag ---------- */
+.suggest-row { display: flex; }
+.suggest-box { margin-top: 4px; padding: 10px 12px; border-radius: 12px; border: 1px dashed var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--surface)); display: flex; flex-direction: column; gap: 8px; }
+.suggestion-text { margin: 0; }
+.suggestion-text .ico { width: 16px; height: 16px; color: var(--accent); vertical-align: -2px; }
+.suggest-row[hidden], .suggest-box[hidden] { display: none; }
