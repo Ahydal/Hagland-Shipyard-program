@@ -199,7 +199,7 @@ async function client() {
   return { Anthropic, c: new Anthropic({ apiKey, dangerouslyAllowBrowser: true, maxRetries: 2 }) };
 }
 
-async function ask({ system, content, maxTokens = 16000, effort, refusalMsg }) {
+async function ask({ system, content, maxTokens = 16000, refusalMsg }) {
   const { Anthropic, c } = await client();
   let response;
   try {
@@ -208,7 +208,6 @@ async function ask({ system, content, maxTokens = 16000, effort, refusalMsg }) {
       max_tokens: maxTokens,
       betas: ['server-side-fallback-2026-07-01'],
       fallbacks: 'default',
-      ...(effort ? { output_config: { effort } } : {}),
       system,
       messages: [{ role: 'user', content }],
     });
@@ -226,39 +225,5 @@ export function summarizeWithClaude(notes, kind = 'week') {
     system: INSTRUCTIONS[kind],
     content: notes,
     refusalMsg: 'Claude could not write this report. Try “Copy for Claude app” instead.',
-  });
-}
-
-const PHOTO_INSTRUCTIONS = `You help a site supervisor (owner's representative) at a shipyard write short field notes during newbuilding supervision.
-Look at the photo(s) and write ONE short, factual note in English (1-2 sentences, at most about 30 words) describing the work shown and its apparent status (e.g. in progress, completed, damaged, not according to good practice).
-
-Rules:
-- Use correct shipbuilding terminology (e.g. fillet weld, primer, tank top, cable tray, insulation, piping, bracket).
-- Only describe what is visible. Do not guess tank numbers, frame numbers, names, measurements or whether something has been approved.
-- You may use the context given (vessel, company, location, draft note). If a draft note is given, improve and complete it rather than replacing its meaning.
-- If the photo is unclear, describe briefly what can be seen.
-- Output only the note text, with no quotes or introduction.`;
-
-/**
- * Tekstforslag fra bilde(r).
- * @param {{data:string, mediaType:string}[]} images base64 (uten data:-prefiks)
- * @param {{vessel?:string, company?:string, location?:string, draft?:string}} ctx
- */
-export function suggestFromPhotos(images, ctx = {}) {
-  const lines = [
-    ctx.vessel && `Vessel: ${ctx.vessel}`,
-    ctx.company && `Company: ${ctx.company}`,
-    ctx.location && `Location on board: ${ctx.location}`,
-    ctx.draft && `Draft note: ${ctx.draft}`,
-  ].filter(Boolean);
-  return ask({
-    system: PHOTO_INSTRUCTIONS,
-    content: [
-      ...images.map((im) => ({ type: 'image', source: { type: 'base64', media_type: im.mediaType, data: im.data } })),
-      { type: 'text', text: lines.length ? `Context:\n${lines.join('\n')}` : 'Write the note.' },
-    ],
-    maxTokens: 4000,
-    effort: 'low', // kort tekst: raskt svar
-    refusalMsg: 'Claude could not describe this photo.',
   });
 }
