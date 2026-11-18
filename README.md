@@ -20,6 +20,7 @@ lager ukessammendrag til Marine Manager.
 
 **På iPhone:**
 1. Velg skip og trykk **«Ta bilde»**. Skriv et par ord og fyll ut sted, og trykk **«Lagre»** (eller **«Lagre og ta neste bilde»**).
+   Registrert på feil skip? Åpne registreringen, velg riktig skip i **«Skip»**-feltet og trykk **«Lagre»**. Bildene og OneDrive-mappene flyttes med.
 2. Når det passer, for eksempel på slutten av dagen: trykk **«Send til OneDrive»** → **«Åpne del-meny»** → **«Arkiver i Filer»** → **OneDrive → Tilsynsdagbok → Innboks**. iPhone husker mappa.
 
 **På PC:** når appen er åpen, henter den inn sendingene automatisk. Bilder og Word-dagbok havner i
