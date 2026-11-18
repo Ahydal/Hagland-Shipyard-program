@@ -1,12 +1,14 @@
 // Service worker: gjør at appen virker uten nett (f.eks. inne i skroget).
 // Øk versjonen når filene endres, så hentes ny versjon ved neste oppstart.
-const CACHE = 'tilsynsdagbok-v2.0.0';
+const CACHE = 'tilsynsdagbok-v2.2.0';
 const ASSETS = [
   './',
   './index.html',
   './css/styles.css',
   './js/app.js',
   './js/db.js',
+  './js/summary.js',
+  './js/sync.js',
   './manifest.webmanifest',
   './icons/icon.svg',
   './icons/icon-192.png',
