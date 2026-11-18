@@ -2,7 +2,7 @@ import * as db from './db.js';
 import * as summary from './summary.js';
 import * as sync from './sync.js';
 
-const APP_VERSION = '2.2.2';
+const APP_VERSION = '2.3.0';
 
 /* ------------------------------------------------------------------ */
 /* Konstanter                                                          */
@@ -812,7 +812,7 @@ async function openEditor(entry, opts = {}) {
   const order = [...e.photoIds, ...stored.map((p) => p.id).filter((id) => !e.photoIds.includes(id))];
   const photos = order.filter((id) => byId.has(id) && !removed.includes(id)).map((id) => byId.get(id));
 
-  state.draft = { entry: e, isNew: opts.restore ? opts.restore.isNew : isNew, photos, removed, added, dirty: !!opts.restore };
+  state.draft = { entry: e, isNew: opts.restore ? opts.restore.isNew : isNew, photos, removed, added, dirty: !!opts.restore, origShipId: entry?.shipId || e.shipId };
   renderEditor(await locationHints(e.shipId));
   const dlg = editorEl();
   if (!dlg.open) dlg.showModal();
@@ -860,6 +860,8 @@ function renderEditor({ hints, last }) {
       </fieldset>
 
       <div class="row">
+        <div class="field"><label for="f-ship">Skip</label>
+          <select id="f-ship" name="shipId">${state.settings.ships.map((s) => `<option value="${s.id}" ${s.id === e.shipId ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select></div>
         <div class="field"><label for="f-date">Dato</label><input id="f-date" type="date" name="date" value="${e.date}"></div>
         <div class="field"><label for="f-time">Klokkeslett</label><input id="f-time" type="time" name="time" value="${e.time}"></div>
       </div>
@@ -894,6 +896,7 @@ function collectDraft() {
   const e = d.entry;
   e.text = f.elements.text.value;
   e.date = f.elements.date.value || state.date;
+  if (f.elements.shipId?.value) e.shipId = f.elements.shipId.value;
   e.time = f.elements.time.value || hhmm(new Date());
   LOC_FIELDS.forEach((lf) => { e.location[lf.key] = f.elements[`loc-${lf.key}`].value.trim(); });
 }
@@ -958,7 +961,9 @@ async function saveEntry({ quiet = false } = {}) {
   state.draft = null;
   editorEl().close();
   if (state.view === 'day' && e.date !== state.date) state.date = e.date;
-  if (!quiet) toast('Lagret');
+  const moved = !d.isNew && e.shipId !== d.origShipId;
+  if (moved) toast(`Flyttet til ${state.settings.ships.find((s) => s.id === e.shipId)?.name || 'annet skip'}`);
+  else if (!quiet) toast('Lagret');
   requestPersist();
   afterLocalChange();
   render();
