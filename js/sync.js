@@ -48,7 +48,7 @@ const isUnconfirmed = (e) => !e.confirmedAt || (e.updatedAt || 0) > e.confirmedA
 /** Innstillinger som deles mellom iPhone og PC (skip, faste områder, inspeksjonsparter). */
 export const sharedSettings = (st) => ({
   ships: st.ships, shipsUpdatedAt: st.shipsUpdatedAt || 0,
-  areas: st.areas || {}, areasUpdatedAt: st.areasUpdatedAt || 0,
+  lists: st.lists || {}, listsUpdatedAt: st.listsUpdatedAt || 0,
   parties: st.parties || null, partiesUpdatedAt: st.partiesUpdatedAt || 0,
 });
 
@@ -227,9 +227,13 @@ export async function applyBundle(data, settings, { markSent = false } = {}) {
     });
     settings.shipsUpdatedAt = s.shipsUpdatedAt;
   }
-  if (s?.areas && (s.areasUpdatedAt || 0) > (settings.areasUpdatedAt || 0)) {
-    settings.areas = s.areas;
-    settings.areasUpdatedAt = s.areasUpdatedAt;
+  if (s?.lists && (s.listsUpdatedAt || 0) > (settings.listsUpdatedAt || 0)) {
+    settings.lists = s.lists;
+    settings.listsUpdatedAt = s.listsUpdatedAt;
+  } else if (s?.areas && (s.areasUpdatedAt || 0) > (settings.listsUpdatedAt || 0)) {
+    // fra eldre versjon: bare tank/rom-lister
+    settings.lists = { ...(settings.lists || {}), room: s.areas };
+    settings.listsUpdatedAt = s.areasUpdatedAt;
   }
   if (s?.parties && (s.partiesUpdatedAt || 0) > (settings.partiesUpdatedAt || 0)) {
     settings.parties = s.parties;
@@ -577,13 +581,18 @@ export async function importFromPc(file, settings) {
 }
 
 /* ------------------------------------------------------------------ */
-/* Bilder sortert per område («By area»)                               */
+/* Bilder sortert per område, seksjon og utstyr                        */
 /* ------------------------------------------------------------------ */
 
-const BY_AREA = 'By area';
 const NO_AREA = 'No location';
+/** Grupperinger: mappenavn i OneDrive, nøkkelprefiks for hva som er skrevet, og om «ikke satt» får egen mappe. */
+export const DIMS = {
+  area: { folder: 'By area', prefix: 'area:', none: NO_AREA, writeNone: true },
+  section: { folder: 'By section', prefix: 'grp:section:', none: 'No section', writeNone: false },
+  equipment: { folder: 'By equipment', prefix: 'grp:equipment:', none: 'No equipment', writeNone: false },
+};
 
-/** «DB1 PS», «db 1 ps» og «DB 1 PS» blir samme område: «DB 1 PS». */
+/** «DB1 PS», «db 1 ps» og «DB 1 PS» blir samme navn: «DB 1 PS». */
 function canonArea(raw) {
   const t = String(raw || '').trim()
     .replace(/([A-Za-zÆØÅæøå])(\d)/g, '$1 $2')
@@ -591,25 +600,38 @@ function canonArea(raw) {
     .replace(/\s+/g, ' ');
   return t ? t.charAt(0).toUpperCase() + t.slice(1) : '';
 }
+const sectionName = (v) => {
+  const t = canonArea(v);
+  return /^\d/.test(t) ? `Section ${t}` : t;
+};
 
 /**
- * Området et bilde hører til: Room/tank, ellers Deck, ellers Section.
- * @returns {{key:string, name:string}}
+ * Gruppen et bilde hører til for en gitt inndeling.
+ * area: Room/tank, ellers Deck, ellers Section. section: Section. equipment: Equipment/system.
+ * @returns {{key:string, name:string, none:boolean}}
  */
-export function areaOf(loc) {
+export function groupOf(dim, loc) {
   let name = '';
-  if (loc?.room) name = canonArea(loc.room);
-  else if (loc?.deck) name = /^\d+$/.test(loc.deck.trim()) ? `Deck ${loc.deck.trim()}` : canonArea(loc.deck);
-  else if (loc?.section) name = `Section ${String(loc.section).trim()}`;
-  if (!name) name = NO_AREA;
-  return { key: name.toLowerCase(), name };
+  if (dim === 'area') {
+    if (loc?.room) name = canonArea(loc.room);
+    else if (loc?.deck) name = /^\d+$/.test(loc.deck.trim()) ? `Deck ${loc.deck.trim()}` : canonArea(loc.deck);
+    else if (loc?.section) name = sectionName(loc.section);
+  } else if (dim === 'section') {
+    if (loc?.section) name = sectionName(loc.section);
+  } else if (dim === 'equipment') {
+    if (loc?.equipment) name = canonArea(loc.equipment);
+  }
+  const none = !name;
+  if (none) name = DIMS[dim].none;
+  return { key: name.toLowerCase(), name, none };
 }
+export const areaOf = (loc) => groupOf('area', loc);
 
-/** Visningsnavn per område: den skrivemåten som er brukt oftest (f.eks. «DB 1 PS» framfor «Db 1 ps»). */
-export function areaNames(entries) {
+/** Visningsnavn per gruppe: den skrivemåten som er brukt oftest (f.eks. «DB 1 PS» framfor «Db 1 ps»). */
+export function groupNames(dim, entries) {
   const count = new Map();
   for (const e of entries) {
-    const { key, name } = areaOf(e.location);
+    const { key, name } = groupOf(dim, e.location);
     if (!count.has(key)) count.set(key, new Map());
     const m = count.get(key);
     m.set(name, (m.get(name) || 0) + 1);
@@ -618,20 +640,30 @@ export function areaNames(entries) {
   for (const [key, m] of count) out.set(key, [...m.entries()].sort((a, b) => b[1] - a[1])[0][0]);
   return out;
 }
+export const areaNames = (entries) => groupNames('area', entries);
 export const NO_AREA_NAME = NO_AREA;
 
-/** Kopi av hvert bilde i <skip>/By area/<område>/. Flytter/sletter når område, skip eller tekst endres. */
 async function writeAreas(root, settings, h) {
+  let changed = 0;
+  for (const dim of Object.keys(DIMS)) changed += await writeGroup(root, settings, h, dim);
+  return changed;
+}
+
+/** Kopi av hvert bilde i <skip>/<By …>/<gruppe>/. Flytter/sletter når gruppe, skip eller tekst endres. */
+async function writeGroup(root, settings, h, dim) {
+  const { folder: BY, prefix, writeNone } = DIMS[dim];
   const entries = await db.getAll('entries');
-  const names = areaNames(entries);
+  const names = groupNames(dim, entries);
   const meta = await db.getAll('meta');
-  const prev = new Map(meta.filter((m) => String(m.key).startsWith('area:')).map((m) => [m.key.slice(5), m]));
+  const prev = new Map(meta.filter((m) => String(m.key).startsWith(prefix)).map((m) => [m.key.slice(prefix.length), m]));
   const wanted = new Map(); // photoId -> { ship, area, name }
   const used = new Map(); // mappe -> sett med filnavn (unngå like navn)
   for (const e of entries) {
     const ship = settings.ships.find((x) => x.id === e.shipId);
     if (!ship) continue;
-    const area = names.get(areaOf(e.location).key);
+    const g = groupOf(dim, e.location);
+    if (g.none && !writeNone) continue;
+    const area = names.get(g.key);
     const time = (e.time || '').replace(':', '');
     const text = (e.text || '').split('\n')[0].trim().slice(0, 50);
     const base = safeName(`${e.date} ${time}${e.company ? ` ${e.company}` : ''}${text ? ` - ${text}` : ''}`, 110);
@@ -646,11 +678,11 @@ async function writeAreas(root, settings, h) {
   }
 
   const dirCache = new Map();
-  const areaDir = async (shipName, area, create) => {
+  const groupDir = async (shipName, area, create) => {
     const k = `${shipName}/${area}`;
     if (dirCache.has(k)) return dirCache.get(k);
     const shipDir = await root.getDirectoryHandle(shipName, { create });
-    const by = await shipDir.getDirectoryHandle(BY_AREA, { create });
+    const by = await shipDir.getDirectoryHandle(BY, { create });
     const d = await by.getDirectoryHandle(area, { create });
     dirCache.set(k, d);
     return d;
@@ -662,13 +694,15 @@ async function writeAreas(root, settings, h) {
     const w = wanted.get(id);
     if (w && w.ship === rec.ship && w.area === rec.area && w.name === rec.name) continue;
     try {
-      const d = await areaDir(rec.ship, rec.area, false);
+      const d = await groupDir(rec.ship, rec.area, false);
       await removeQuiet(d, rec.name);
-      const by = await (await root.getDirectoryHandle(rec.ship)).getDirectoryHandle(BY_AREA);
+      const shipDir = await root.getDirectoryHandle(rec.ship);
+      const by = await shipDir.getDirectoryHandle(BY);
       await removeQuiet(by, rec.area); // bare hvis tom
+      await removeQuiet(shipDir, BY); // bare hvis tom
       dirCache.delete(`${rec.ship}/${rec.area}`);
     } catch { /* finnes ikke lenger */ }
-    if (!w) { await db.del('meta', `area:${id}`); changed++; }
+    if (!w) { await db.del('meta', `${prefix}${id}`); changed++; }
   }
   // Skriv nye / flyttede
   let n = 0;
@@ -677,9 +711,9 @@ async function writeAreas(root, settings, h) {
     if (rec && rec.ship === w.ship && rec.area === w.area && rec.name === w.name) continue;
     const p = await db.get('photos', id);
     if (!p) continue;
-    if (++n % 10 === 0) h.onProgress?.(`Sorting photos by area (${n}) …`);
-    await writeFile(await areaDir(w.ship, w.area, true), w.name, p.blob);
-    await db.put('meta', { key: `area:${id}`, ...w });
+    if (++n % 10 === 0) h.onProgress?.(`Sorting photos ${BY.toLowerCase()} (${n}) …`);
+    await writeFile(await groupDir(w.ship, w.area, true), w.name, p.blob);
+    await db.put('meta', { key: `${prefix}${id}`, ...w });
     changed++;
   }
   return changed;

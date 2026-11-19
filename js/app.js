@@ -2,7 +2,7 @@ import * as db from './db.js';
 import * as summary from './summary.js';
 import * as sync from './sync.js';
 
-const APP_VERSION = '3.4.0';
+const APP_VERSION = '3.5.0';
 
 /* ------------------------------------------------------------------ */
 /* Konstanter                                                          */
@@ -17,7 +17,7 @@ const DEFAULT_SETTINGS = {
   stampPhotos: false,
   reportName: '',
   reportTitle: '',
-  areas: {}, // faste tanker/rom per skip: { skip1: ['DB 1 PS', ...] }
+  lists: {}, // faste lister per type og skip: { room: { skip1: ['DB 1 PS', ...] }, section: {...}, equipment: {...} }
   parties: ['Class', 'Owner', 'Yard', 'Paint supplier'], // hvem som deltar på inspeksjoner
 };
 
@@ -27,8 +27,9 @@ const LOC_FIELDS = [
   { key: 'frame', label: 'Frame', ph: 'e.g. 42–45', defaults: [] },
   { key: 'deck', label: 'Deck', ph: 'e.g. Deck 2', defaults: ['Tank top', 'Deck 1', 'Deck 2', 'Deck 3', 'Main deck', 'Bridge deck'] },
   { key: 'room', label: 'Room / tank', ph: 'e.g. DB 1 PS', defaults: ['Engine room', 'Wheelhouse', 'Cargo hold', 'Pump room', 'Switchboard room', 'Workshop', 'Mess room', 'Galley', 'Cabin', 'Steering gear room'] },
+  { key: 'equipment', label: 'Equipment / system', ph: 'e.g. Main engine, Hatch cover No. 2', defaults: [] },
 ];
-const emptyLoc = () => ({ section: '', frame: '', deck: '', room: '' });
+const emptyLoc = () => ({ section: '', frame: '', deck: '', room: '', equipment: '' });
 
 const DRAFT_KEY = 'tilsyn-draft';
 
@@ -121,6 +122,7 @@ function fmtLoc(loc) {
   if (loc.frame) p.push(`Fr. ${loc.frame}`);
   if (loc.deck) p.push(/^\d+$/.test(loc.deck) ? `Deck ${loc.deck}` : loc.deck);
   if (loc.room) p.push(loc.room);
+  if (loc.equipment) p.push(loc.equipment);
   return p.join(' · ');
 }
 const hasLoc = (loc) => !!loc && LOC_FIELDS.some((f) => loc[f.key]);
@@ -193,6 +195,12 @@ const mmWeekTitle = (sh, start) => `${sh.name}. Week ${isoWeek(start)} (${summar
 async function loadSettings() {
   const rec = await db.get('meta', 'settings');
   state.settings = { ...structuredClone(DEFAULT_SETTINGS), ...(rec?.value || {}) };
+  // Overgang: tank/rom-lister fra v3.4 («areas») inn i «lists.room»
+  const st = state.settings;
+  if (st.areas && !st.lists?.room) {
+    st.lists = { ...(st.lists || {}), room: st.areas };
+    st.listsUpdatedAt = st.areasUpdatedAt || Date.now();
+  }
 }
 const saveSettings = () => db.put('meta', { key: 'settings', value: state.settings });
 
@@ -370,7 +378,15 @@ const inspBadge = (e) => (e.inspection
   ? `<span class="insp-badge ${e.inspection.result || ''}">${icon('check')}Inspection${e.inspection.result ? ` · ${summary.resultLabel(e.inspection.result)}` : ''}</span>` : '');
 
 /** Faste tanker/rom for et skip (fra Settings). */
-const areaList = (shipId) => state.settings.areas?.[shipId] || [];
+const LISTS = {
+  room: { title: 'Tanks and rooms', ph: 'DB 1 PS&#10;DB 1 SB&#10;Engine room' },
+  section: { title: 'Sections', ph: '120&#10;121&#10;215' },
+  equipment: { title: 'Equipment and systems', ph: 'Main engine&#10;Hatch cover No. 1&#10;Rudder&#10;BWTS' },
+};
+/** Fast liste (room/section/equipment) for et skip (fra Settings). */
+const listFor = (kind, shipId) => state.settings.lists?.[kind]?.[shipId] || [];
+const areaList = (shipId) => listFor('room', shipId);
+const DIM_FIELD = { area: 'room', section: 'section', equipment: 'equipment' };
 
 const VIEWS = {
   async day() {
@@ -496,7 +512,8 @@ const VIEWS = {
             <div class="tally-grid">
               ${tallyList('Section', tally('section'), 'Sec. ')}
               ${tallyList('Deck', tally('deck'))}
-              ${tallyList('Room', tally('room'))}
+              ${tallyList('Room / tank', tally('room'))}
+              ${tallyList('Equipment', tally('equipment'))}
             </div>
           </div>
         </aside>
@@ -580,15 +597,17 @@ const VIEWS = {
   async photos() {
     const sh = state.settings.ships.find((x) => x.id === state.galleryShip) || ship();
     const entries = (await db.getAllBy('entries', 'shipId', sh.id)).map(normalize).filter((e) => e.photoIds.length);
-    const names = sync.areaNames(entries);
+    const dim = state.galleryDim || 'area';
+    const field = DIM_FIELD[dim];
+    const names = sync.groupNames(dim, entries);
     const groups = new Map();
     for (const e of entries) {
-      const key = sync.areaOf(e.location).key;
-      if (!groups.has(key)) groups.set(key, { key, name: names.get(key), items: [] });
-      e.photoIds.forEach((id) => groups.get(key).items.push({ id, e }));
+      const g = sync.groupOf(dim, e.location);
+      if (!groups.has(g.key)) groups.set(g.key, { key: g.key, name: names.get(g.key), none: g.none, items: [] });
+      e.photoIds.forEach((id) => groups.get(g.key).items.push({ id, e }));
     }
-    const noArea = sync.NO_AREA_NAME.toLowerCase();
-    const order = new Map(areaList(sh.id).map((n, i) => [sync.areaOf({ room: n }).key, i]));
+    const noArea = sync.DIMS[dim].none.toLowerCase();
+    const order = new Map(listFor(field, sh.id).map((n, i) => [sync.groupOf(dim, { [field]: n }).key, i]));
     const rank = (g) => (order.has(g.key) ? order.get(g.key) : 1e6);
     const list = [...groups.values()].sort((a, b) => (a.key === noArea) - (b.key === noArea) || rank(a) - rank(b) || a.name.localeCompare(b.name, 'en', { numeric: true }));
     if (state.galleryArea !== 'all' && !groups.has(state.galleryArea)) state.galleryArea = 'all';
@@ -599,16 +618,20 @@ const VIEWS = {
     const total = list.reduce((n, g) => n + g.items.length, 0);
     return `
     <section class="view">
-      <div class="chips">${state.settings.ships.map((x) => `<button class="chip-f ${x.id === sh.id ? 'on' : ''}" data-action="gallery-ship" data-ship="${x.id}">${esc(x.name)}</button>`).join('')}</div>
+      <div class="gallery-top">
+        <div class="chips">${state.settings.ships.map((x) => `<button class="chip-f ${x.id === sh.id ? 'on' : ''}" data-action="gallery-ship" data-ship="${x.id}">${esc(x.name)}</button>`).join('')}</div>
+        <div class="seg-tabs" role="tablist" aria-label="Group by">${[['area', 'Room / tank'], ['section', 'Section'], ['equipment', 'Equipment']].map(([d, l]) => `<button role="tab" class="${dim === d ? 'on' : ''}" data-action="gallery-dim" data-dim="${d}">${l}</button>`).join('')}</div>
+      </div>
       <div class="gallery-layout">
         <nav class="card area-list" aria-label="Areas">
           <button class="area-item ${!sel ? 'on' : ''}" data-action="gallery-area" data-key="all">${icon('image')}<span>All photos</span><b>${total}</b></button>
           ${list.map((g) => `<button class="area-item ${sel?.key === g.key ? 'on' : ''}" data-action="gallery-area" data-key="${esc(g.key)}">${icon('folder')}<span>${esc(g.name)}</span><b>${g.items.length}</b></button>`).join('')}
-          <p class="muted small">Areas come from “Room / tank”, then Deck, then Section. The same folders are in OneDrive under <b>${esc(sh.name)} → By area</b>.</p>
+          <p class="muted small">${({ area: 'Grouped by “Room / tank”, then Deck, then Section.', section: 'Grouped by “Section”.', equipment: 'Grouped by “Equipment / system”.' })[dim]}
+            The same folders are in OneDrive under <b>${esc(sh.name)} → ${sync.DIMS[dim].folder}</b>${dim === 'area' ? '' : ' (photos without a value are only in the app)'}.</p>
         </nav>
         <div class="card">
           <div class="feed-head"><h2>${esc(sel ? sel.name : 'All photos')} <span class="muted small">(${items.length})</span></h2>
-            ${sel && sel.key !== noArea ? `<button class="btn small" data-action="rename-area" data-key="${esc(sel.key)}" data-name="${esc(sel.name)}" data-ship="${sh.id}">${icon('pen')} Rename</button>` : ''}</div>
+            ${sel && !sel.none ? `<button class="btn small" data-action="rename-area" data-key="${esc(sel.key)}" data-name="${esc(sel.name)}" data-ship="${sh.id}">${icon('pen')} Rename</button>` : ''}</div>
           ${items.length ? photoWeeks(items) : '<p class="muted">No photos yet.</p>'}
         </div>
       </div>
@@ -639,14 +662,18 @@ const VIEWS = {
       </div>
 
       <div class="card">
-        <h2>${icon('list')} Tanks and rooms</h2>
-        <p class="muted">A fixed list per vessel, one per line (e.g. DB 1 PS, DB 1 SB, Engine room). It is offered when you pick “Room / tank”, keeps names consistent, and sets the order of the photo folders. Shared with the other device when you send or fetch.</p>
-        ${s.ships.map((sh, i) => `
-          <div class="field">
-            <label>${esc(sh.name)} <span class="muted">(${areaList(sh.id).length})</span></label>
-            <textarea rows="5" data-areas="${sh.id}" placeholder="DB 1 PS&#10;DB 1 SB&#10;Engine room">${esc(areaList(sh.id).join('\n'))}</textarea>
-            ${s.ships.filter((o) => o.id !== sh.id && areaList(o.id).length).map((o) => `<button class="btn small ghost" data-action="copy-areas" data-from="${o.id}" data-to="${sh.id}">${icon('copy')} Copy list from ${esc(o.name)}</button>`).join('')}
-          </div>`).join('')}
+        <h2>${icon('list')} Lists</h2>
+        <p class="muted">Fixed lists per vessel, one per line. They are offered with “List” when you register, keep names consistent, and set the order of the photo folders. Shared with the other device when you send or fetch.</p>
+        ${Object.entries(LISTS).map(([kind, L]) => `
+          <details class="list-block" ${listFor(kind, s.ships[0]?.id).length || kind === 'room' ? 'open' : ''}>
+            <summary><b>${L.title}</b> <span class="muted">(${s.ships.map((sh) => `${esc(sh.name)}: ${listFor(kind, sh.id).length}`).join(' · ')})</span></summary>
+            ${s.ships.map((sh) => `
+              <div class="field">
+                <label>${esc(sh.name)}</label>
+                <textarea rows="5" data-list="${kind}" data-ship="${sh.id}" placeholder="${L.ph}">${esc(listFor(kind, sh.id).join('\n'))}</textarea>
+                ${s.ships.filter((o) => o.id !== sh.id && listFor(kind, o.id).length).map((o) => `<button class="btn small ghost" data-action="copy-list" data-kind="${kind}" data-from="${o.id}" data-to="${sh.id}">${icon('copy')} Copy list from ${esc(o.name)}</button>`).join('')}
+              </div>`).join('')}
+          </details>`).join('')}
       </div>
 
       <div class="card">
@@ -1091,7 +1118,7 @@ async function locationHints(shipId = ship().id) {
   LOC_FIELDS.forEach((f) => {
     const set = new Set(all.map((e) => e.location?.[f.key]).filter(Boolean));
     f.defaults.forEach((d) => set.add(d));
-    if (f.key === 'room') areaList(shipId).forEach((d) => set.add(d));
+    if (LISTS[f.key]) listFor(f.key, shipId).forEach((d) => set.add(d));
     hints[f.key] = [...set].sort((a, b) => a.localeCompare(b, 'en', { numeric: true }));
   });
   const last = all.filter((e) => hasLoc(e.location))
@@ -1184,8 +1211,8 @@ function renderEditor({ hints, last, companies }) {
         ${showLast ? `<button type="button" class="chip last-loc" data-action="use-last-loc">Same as last: ${esc(fmtLoc(last))}</button>` : ''}
         <div class="loc-grid">
           ${LOC_FIELDS.map((f) => `
-            <div class="field">
-              <label for="f-${f.key}">${f.label}${f.key === 'room' && areaList(e.shipId).length ? ` <button type="button" class="link-btn" data-action="pick-area">${icon('list')} List</button>` : ''}</label>
+            <div class="field f-${f.key}">
+              <label for="f-${f.key}">${f.label}${LISTS[f.key] && listFor(f.key, e.shipId).length ? ` <button type="button" class="link-btn" data-action="pick-area" data-field="${f.key}">${icon('list')} List</button>` : ''}</label>
               <input id="f-${f.key}" name="loc-${f.key}" value="${esc(e.location[f.key])}" placeholder="${f.ph}" list="dl-${f.key}" autocomplete="off" enterkeyhint="next">
               <datalist id="dl-${f.key}">${hints[f.key].map((v) => `<option value="${esc(v)}">`).join('')}</datalist>
             </div>`).join('')}
@@ -1330,17 +1357,17 @@ async function closeEditor() {
 /* Velger for faste tanker/rom                                         */
 /* ------------------------------------------------------------------ */
 
-function openAreaPicker() {
+function openAreaPicker(field = 'room') {
   const d = state.draft;
   if (!d) return;
   collectDraft();
-  const list = areaList(d.entry.shipId);
+  const list = listFor(field, d.entry.shipId);
   const dlg = $('#sheet');
   dlg.innerHTML = `
     <div class="sheet area-sheet">
-      <h2>${icon('list')} Tanks and rooms</h2>
-      <input type="search" placeholder="Search, e.g. DB 1" data-input="area-search" autocomplete="off">
-      <div class="area-picks">${list.map((a) => `<button type="button" class="area-pick ${a === d.entry.location.room ? 'on' : ''}" data-action="choose-area" data-area="${esc(a)}">${esc(a)}</button>`).join('')}</div>
+      <h2>${icon('list')} ${LISTS[field].title}</h2>
+      <input type="search" placeholder="Search" data-input="area-search" autocomplete="off">
+      <div class="area-picks">${list.map((a) => `<button type="button" class="area-pick ${a === d.entry.location[field] ? 'on' : ''}" data-action="choose-area" data-field="${field}" data-area="${esc(a)}">${esc(a)}</button>`).join('')}</div>
       <button class="btn ghost" data-action="close-sheet">Cancel</button>
     </div>`;
   if (!dlg.open) dlg.showModal();
@@ -1477,28 +1504,44 @@ const ACTIONS = {
   'report-ship': (el) => { state.reportShip = el.dataset.ship; render(); },
   'gallery-ship': (el) => { state.galleryShip = el.dataset.ship; state.galleryArea = 'all'; render(); },
   'gallery-area': (el) => { state.galleryArea = el.dataset.key; render(); },
+  'gallery-dim': (el) => { state.galleryDim = el.dataset.dim; state.galleryArea = 'all'; render(); },
   'rename-area': async (el) => {
     const to = prompt(`Rename “${el.dataset.name}” to:`, el.dataset.name)?.trim();
     if (!to || to === el.dataset.name) return;
+    const dim = state.galleryDim || 'area';
+    const field = DIM_FIELD[dim];
     const all = (await db.getAllBy('entries', 'shipId', el.dataset.ship)).map(normalize)
-      .filter((e) => sync.areaOf(e.location).key === el.dataset.key);
+      .filter((e) => sync.groupOf(dim, e.location).key === el.dataset.key);
     const now = Date.now();
-    await db.putMany('entries', all.map((e) => ({ ...e, location: { ...e.location, room: to }, updatedAt: now })));
-    state.galleryArea = sync.areaOf({ room: to }).key;
+    await db.putMany('entries', all.map((e) => ({ ...e, location: { ...e.location, [field]: to }, updatedAt: now })));
+    state.galleryArea = sync.groupOf(dim, { [field]: to }).key;
+    // Samme navn i den faste lista, så rekkefølge og velger følger med
+    const list = listFor(field, el.dataset.ship);
+    const idx = list.findIndex((n) => sync.groupOf(dim, { [field]: n }).key === el.dataset.key);
+    if (idx >= 0) {
+      const lists = { ...(state.settings.lists || {}) };
+      lists[field] = { ...(lists[field] || {}), [el.dataset.ship]: list.map((n, i) => (i === idx ? to : n)) };
+      state.settings.lists = lists;
+      state.settings.listsUpdatedAt = now;
+      await saveSettings();
+    }
     toast(`Renamed ${all.length} ${all.length === 1 ? 'entry' : 'entries'} to “${to}”`);
     afterLocalChange();
     render();
   },
-  'copy-areas': async (el) => {
-    state.settings.areas = { ...(state.settings.areas || {}), [el.dataset.to]: [...areaList(el.dataset.from)] };
-    state.settings.areasUpdatedAt = Date.now();
+  'copy-list': async (el) => {
+    const kind = el.dataset.kind;
+    const lists = { ...(state.settings.lists || {}) };
+    lists[kind] = { ...(lists[kind] || {}), [el.dataset.to]: [...listFor(kind, el.dataset.from)] };
+    state.settings.lists = lists;
+    state.settings.listsUpdatedAt = Date.now();
     await saveSettings();
     toast('List copied');
     render();
   },
-  'pick-area': () => openAreaPicker(),
+  'pick-area': (el) => openAreaPicker(el.dataset.field),
   'choose-area': (el) => {
-    $('#f-room').value = el.dataset.area;
+    $(`#f-${el.dataset.field || 'room'}`).value = el.dataset.area;
     $('#sheet').close();
     saveDraftLocal();
   },
@@ -1716,11 +1759,13 @@ function bindEvents() {
   document.addEventListener('change', (ev) => {
     const el = ev.target;
     if (el.dataset.change && CHANGES[el.dataset.change]) CHANGES[el.dataset.change](el);
-    if (el.dataset.areas) {
+    if (el.dataset.list) {
       const list = [...new Set(el.value.split('\n').map((x) => x.trim()).filter(Boolean))];
-      state.settings.areas = { ...(state.settings.areas || {}), [el.dataset.areas]: list };
-      state.settings.areasUpdatedAt = Date.now();
-      saveSettings().then(() => toast(`${list.length} tanks/rooms saved`));
+      const lists = { ...(state.settings.lists || {}) };
+      lists[el.dataset.list] = { ...(lists[el.dataset.list] || {}), [el.dataset.ship]: list };
+      state.settings.lists = lists;
+      state.settings.listsUpdatedAt = Date.now();
+      saveSettings().then(() => toast(`${list.length} saved`));
     }
     if (el.dataset.parties) {
       state.settings.parties = [...new Set(el.value.split('\n').map((x) => x.trim()).filter(Boolean))];

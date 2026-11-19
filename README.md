@@ -30,8 +30,13 @@ Appen er på engelsk. Knappenavnene under er de du ser i appen.
 **Inspeksjon:** huk av **«Inspection»**, velg resultat (Accepted / With comments / Rejected) og hvem som deltok. Det kommer tydelig med i dags- og ukesrapporten
 (avviste inspeksjoner havner under «Findings»). Hvem som kan delta, settes under Settings → Inspections.
 
-**Faste tanker og rom:** under Settings → *Tanks and rooms* legger du inn lista per skip (én per linje). Trykk **«List»** ved «Room / tank» for å velge.
-Lista deles mellom iPhone og PC, og bestemmer rekkefølgen på bildemappene. I «Photos» på PC kan et område få nytt navn med **«Rename»**. Bildene flyttes da også.
+**Sted, seksjon og utstyr:** under «Location on board» fyller du ut Section, Deck, «Room / tank» og **«Equipment / system»** (f.eks. Main engine, Hatch cover No. 2).
+Under Settings → **Lists** legger du inn faste lister per skip for tanker/rom, seksjoner og utstyr (én per linje), og velger med **«List»** når du registrerer.
+Listene deles mellom iPhone og PC.
+
+**Bilder i OneDrive og galleri:** hvert bilde legges også i `<skip>\By area\…` (tank/rom, ellers dekk/seksjon), `<skip>\By section\Section 120\…`
+og `<skip>\By equipment\Main engine\…` når det er satt. I «Photos» på PC velger du inndeling med **Room / tank · Section · Equipment**, og bildene vises per uke.
+**«Rename»** gir en gruppe nytt navn: registreringene, lista og OneDrive-mappene oppdateres.
 
 **Sending som ikke kom fram:** endringer regnes ikke som levert før PC-en har bekreftet dem via «Get from PC». Til da blir de med i hver sending,
 så ingenting går tapt hvis en fil aldri kom fram til OneDrive. Tips: åpne OneDrive-appen et øyeblikk etter at du har sendt.
