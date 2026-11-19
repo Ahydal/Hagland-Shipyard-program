@@ -27,6 +27,15 @@ Appen er på engelsk. Knappenavnene under er de du ser i appen.
 4. **Hent fra PC:** trykk **«Get from PC»** og velg `From PC/site-diary-from-pc.json` i OneDrive.
    Du får da med endringer gjort på PC-en: registreringer, bemanning, slettinger og bilder.
 
+**Inspeksjon:** huk av **«Inspection»**, velg resultat (Accepted / With comments / Rejected) og hvem som deltok. Det kommer tydelig med i dags- og ukesrapporten
+(avviste inspeksjoner havner under «Findings»). Hvem som kan delta, settes under Settings → Inspections.
+
+**Faste tanker og rom:** under Settings → *Tanks and rooms* legger du inn lista per skip (én per linje). Trykk **«List»** ved «Room / tank» for å velge.
+Lista deles mellom iPhone og PC, og bestemmer rekkefølgen på bildemappene. I «Photos» på PC kan et område få nytt navn med **«Rename»**. Bildene flyttes da også.
+
+**Sending som ikke kom fram:** endringer regnes ikke som levert før PC-en har bekreftet dem via «Get from PC». Til da blir de med i hver sending,
+så ingenting går tapt hvis en fil aldri kom fram til OneDrive. Tips: åpne OneDrive-appen et øyeblikk etter at du har sendt.
+
 **Registrert på feil skip?** Åpne registreringen, velg riktig skip i **«Vessel»** og trykk **«Save»**.
 
 **På PC:** når appen er åpen, henter den inn sendingene automatisk (hvert 2. minutt). Bilder og Word-dagbok («Daily log») havner i

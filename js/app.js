@@ -2,7 +2,7 @@ import * as db from './db.js';
 import * as summary from './summary.js';
 import * as sync from './sync.js';
 
-const APP_VERSION = '3.3.0';
+const APP_VERSION = '3.4.0';
 
 /* ------------------------------------------------------------------ */
 /* Konstanter                                                          */
@@ -17,6 +17,8 @@ const DEFAULT_SETTINGS = {
   stampPhotos: false,
   reportName: '',
   reportTitle: '',
+  areas: {}, // faste tanker/rom per skip: { skip1: ['DB 1 PS', ...] }
+  parties: ['Class', 'Owner', 'Yard', 'Paint supplier'], // hvem som deltar på inspeksjoner
 };
 
 // Plassering om bord. Forslagene lærer av det du har skrevet før.
@@ -54,6 +56,8 @@ const ICON_PATHS = {
   report: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>',
   minus: '<line x1="5" y1="12" x2="19" y2="12"/>',
   plus: '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>',
+  list: '<line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>',
+  check: '<polyline points="20 6 9 17 4 12"/>',
   key: '<circle cx="7.5" cy="15.5" r="5.5"/><path d="M21 2l-9.6 9.6"/><path d="M15.5 7.5l3 3L22 7l-3-3"/>',
 };
 const icon = (name, cls = '') => `<svg class="ico ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICON_PATHS[name] || ''}</svg>`;
@@ -331,6 +335,7 @@ function entryCard(e, { showShip = false } = {}) {
       <time>${esc(e.time || '')}</time>
       ${sh ? `<span class="ship-badge">${esc(sh.name)}</span>` : ''}
       ${e.company ? `<span class="company-badge">${esc(e.company)}</span>` : ''}
+      ${inspBadge(e)}
       ${loc ? `<span class="loc">${icon('pin')}${esc(loc)}</span>` : ''}
     </div>
     ${e.text ? `<p class="entry-text">${esc(e.text)}</p>` : '<p class="entry-text muted">No note</p>'}
@@ -356,10 +361,16 @@ function photoWeeks(items) {
     <div class="gallery big">${w.list.map((x) => `
       <figure data-action="view-photo" data-gallery="1" data-index="${x.i}">
         <img data-photo="${x.id}" alt="" loading="lazy">
-        <figcaption><b>${fmtNum(x.e.date)} ${esc(x.e.time)}</b>${x.e.company ? ` · ${esc(x.e.company)}` : ''}<br>${esc((x.e.text || '').split('\n')[0].slice(0, 90))}</figcaption>
+        <figcaption><b>${fmtNum(x.e.date)} ${esc(x.e.time)}</b>${x.e.company ? ` · ${esc(x.e.company)}` : ''}${x.e.inspection ? ` · <span class="insp-text ${x.e.inspection.result || ''}">Inspection${x.e.inspection.result ? ` ${summary.resultLabel(x.e.inspection.result).toLowerCase()}` : ''}</span>` : ''}<br>${esc((x.e.text || '').split('\n')[0].slice(0, 90))}</figcaption>
       </figure>`).join('')}</div>`;
   }).join('');
 }
+
+const inspBadge = (e) => (e.inspection
+  ? `<span class="insp-badge ${e.inspection.result || ''}">${icon('check')}Inspection${e.inspection.result ? ` · ${summary.resultLabel(e.inspection.result)}` : ''}</span>` : '');
+
+/** Faste tanker/rom for et skip (fra Settings). */
+const areaList = (shipId) => state.settings.areas?.[shipId] || [];
 
 const VIEWS = {
   async day() {
@@ -577,7 +588,9 @@ const VIEWS = {
       e.photoIds.forEach((id) => groups.get(key).items.push({ id, e }));
     }
     const noArea = sync.NO_AREA_NAME.toLowerCase();
-    const list = [...groups.values()].sort((a, b) => (a.key === noArea) - (b.key === noArea) || a.name.localeCompare(b.name, 'en', { numeric: true }));
+    const order = new Map(areaList(sh.id).map((n, i) => [sync.areaOf({ room: n }).key, i]));
+    const rank = (g) => (order.has(g.key) ? order.get(g.key) : 1e6);
+    const list = [...groups.values()].sort((a, b) => (a.key === noArea) - (b.key === noArea) || rank(a) - rank(b) || a.name.localeCompare(b.name, 'en', { numeric: true }));
     if (state.galleryArea !== 'all' && !groups.has(state.galleryArea)) state.galleryArea = 'all';
     const sel = state.galleryArea === 'all' ? null : groups.get(state.galleryArea);
     const items = (sel ? sel.items : list.flatMap((g) => g.items))
@@ -594,7 +607,8 @@ const VIEWS = {
           <p class="muted small">Areas come from “Room / tank”, then Deck, then Section. The same folders are in OneDrive under <b>${esc(sh.name)} → By area</b>.</p>
         </nav>
         <div class="card">
-          <h2>${esc(sel ? sel.name : 'All photos')} <span class="muted small">(${items.length})</span></h2>
+          <div class="feed-head"><h2>${esc(sel ? sel.name : 'All photos')} <span class="muted small">(${items.length})</span></h2>
+            ${sel && sel.key !== noArea ? `<button class="btn small" data-action="rename-area" data-key="${esc(sel.key)}" data-name="${esc(sel.name)}" data-ship="${sh.id}">${icon('pen')} Rename</button>` : ''}</div>
           ${items.length ? photoWeeks(items) : '<p class="muted">No photos yet.</p>'}
         </div>
       </div>
@@ -622,6 +636,23 @@ const VIEWS = {
             <div class="field grow"><label>Name</label><input value="${esc(sh.name)}" data-ship-field="name" data-i="${i}"></div>
             <div class="field"><label>Hull no.</label><input value="${esc(sh.hull)}" data-ship-field="hull" data-i="${i}" placeholder="e.g. NB 123"></div>
           </div>`).join('')}
+      </div>
+
+      <div class="card">
+        <h2>${icon('list')} Tanks and rooms</h2>
+        <p class="muted">A fixed list per vessel, one per line (e.g. DB 1 PS, DB 1 SB, Engine room). It is offered when you pick “Room / tank”, keeps names consistent, and sets the order of the photo folders. Shared with the other device when you send or fetch.</p>
+        ${s.ships.map((sh, i) => `
+          <div class="field">
+            <label>${esc(sh.name)} <span class="muted">(${areaList(sh.id).length})</span></label>
+            <textarea rows="5" data-areas="${sh.id}" placeholder="DB 1 PS&#10;DB 1 SB&#10;Engine room">${esc(areaList(sh.id).join('\n'))}</textarea>
+            ${s.ships.filter((o) => o.id !== sh.id && areaList(o.id).length).map((o) => `<button class="btn small ghost" data-action="copy-areas" data-from="${o.id}" data-to="${sh.id}">${icon('copy')} Copy list from ${esc(o.name)}</button>`).join('')}
+          </div>`).join('')}
+      </div>
+
+      <div class="card">
+        <h2>${icon('check')} Inspections</h2>
+        <p class="muted">Who can attend inspections, one per line (e.g. Class, Owner, Yard, Paint supplier). Shown as buttons when you mark an entry as an inspection.</p>
+        <textarea rows="4" data-parties="1">${esc((s.parties || []).join('\n'))}</textarea>
       </div>
 
       <div class="card">
@@ -935,12 +966,14 @@ function refreshSyncCard() {
 /** iPhone: status og forklaring. */
 async function iphoneOneDriveCard() {
   const pending = await sync.pendingCount();
+  const unconfirmed = await sync.unconfirmedCount();
   const last = (await db.get('meta', 'lastSent'))?.at;
   const fromPc = await db.get('meta', 'lastFromPc');
   return `<div class="card">
     <h2>${icon('cloud')} OneDrive</h2>
     <p>${pending ? `<b>${pending}</b> ${pending === 1 ? 'change has' : 'changes have'} not been sent.` : '✅ Everything has been sent.'} <span class="muted">Last sent ${fmtWhen(last)}.</span></p>
-    <button class="btn primary" data-action="send-onedrive" ${pending ? '' : 'disabled'}>${icon('cloud')} Send to OneDrive</button>
+    ${unconfirmed ? `<p class="muted small">${unconfirmed} sent ${unconfirmed === 1 ? 'change is' : 'changes are'} not yet confirmed by the PC. ${unconfirmed === 1 ? 'It is' : 'They are'} included again in the next send, so nothing is lost if a file never arrived. “Get changes from PC” confirms them.</p>` : ''}
+    <button class="btn primary" data-action="send-onedrive" ${pending || unconfirmed ? '' : 'disabled'}>${icon('cloud')} Send to OneDrive</button>
     <ol class="howto">
       <li>Tap “Send to OneDrive”, then “Open share menu”.</li>
       <li>Choose <b>“Save to Files”</b> → <b>OneDrive</b> → your app folder → <b>Inbox</b> → “Save”. The iPhone remembers the folder next time.</li>
@@ -952,7 +985,7 @@ async function iphoneOneDriveCard() {
       ${fromPc ? `Last fetched ${fmtWhen(fromPc.importedAt)} (PC file from ${fmtWhen(fromPc.at)}).` : 'Not fetched yet.'}</p>
     <label class="btn">${icon('refresh')} Get changes from PC<input type="file" accept=".json,application/json,text/plain" data-change="import-pc" hidden></label>
     <p class="muted small">Choose <b>OneDrive</b> → your app folder → <b>From PC</b> → <b>site-diary-from-pc.json</b>.</p>
-    <button class="btn small ghost" data-action="resend-all">Send everything again next time</button>
+
   </div>`;
 }
 
@@ -963,17 +996,19 @@ async function prepareSend() {
   toast('Packing …');
   preparedBundle = await sync.buildBundle(state.settings);
   if (!preparedBundle.count) { toast('Everything has already been sent'); return; }
-  const mb = (preparedBundle.blob.size / 1048576).toLocaleString('en-GB', { maximumFractionDigits: 1 });
+  const size = preparedBundle.blob.size / 1048576;
+  const mb = size < 0.1 ? '< 0.1' : size.toLocaleString('en-GB', { maximumFractionDigits: 1 });
   const dlg = $('#sheet');
   dlg.innerHTML = `
     <div class="sheet">
       <h2>${icon('cloud')} Send to OneDrive</h2>
-      <p><b>${preparedBundle.count}</b> ${preparedBundle.count === 1 ? 'change' : 'changes'} ready to send (${mb} MB).</p>
+      <p><b>${preparedBundle.fresh}</b> new ${preparedBundle.fresh === 1 ? 'change' : 'changes'}${preparedBundle.count > preparedBundle.fresh ? ` + ${preparedBundle.count - preparedBundle.fresh} earlier, not yet confirmed by the PC` : ''} (${mb} MB).</p>
       <ol class="howto">
         <li>Tap “Open share menu”.</li>
         <li>Choose <b>“Save to Files”</b>.</li>
         <li>Choose <b>OneDrive</b> (the same one the PC uses, e.g. “OneDrive – Hagland”) → your app folder → <b>Inbox</b> and tap “Save”.</li>
       </ol>
+      <p class="muted small">Tip: open the OneDrive app for a moment afterwards. iOS sometimes waits to upload until OneDrive is opened.</p>
       <button class="btn primary big" data-action="share-bundle">${icon('cloud')} Open share menu</button>
       <button class="btn ghost" data-action="close-sheet">Cancel</button>
     </div>`;
@@ -1056,6 +1091,7 @@ async function locationHints(shipId = ship().id) {
   LOC_FIELDS.forEach((f) => {
     const set = new Set(all.map((e) => e.location?.[f.key]).filter(Boolean));
     f.defaults.forEach((d) => set.add(d));
+    if (f.key === 'room') areaList(shipId).forEach((d) => set.add(d));
     hints[f.key] = [...set].sort((a, b) => a.localeCompare(b, 'en', { numeric: true }));
   });
   const last = all.filter((e) => hasLoc(e.location))
@@ -1129,13 +1165,27 @@ function renderEditor({ hints, last, companies }) {
         <datalist id="dl-company">${companies.all.map((c) => `<option value="${esc(c)}">`).join('')}</datalist>
       </div>
 
+      <div class="inspbox">
+        <label class="check"><input type="checkbox" name="isInspection" data-change="toggle-insp" ${e.inspection ? 'checked' : ''}> <b>Inspection</b> <span class="muted">– record result and who attended</span></label>
+        <div class="insp-fields" ${e.inspection ? '' : 'hidden'}>
+          <div class="seg" role="radiogroup" aria-label="Result">
+            ${[['accepted', 'Accepted'], ['comments', 'With comments'], ['rejected', 'Rejected']].map(([v, l]) => `
+              <label class="seg-opt ${v}"><input type="radio" name="inspResult" value="${v}" ${e.inspection?.result === v ? 'checked' : ''}><span>${l}</span></label>`).join('')}
+          </div>
+          <div class="chips party-chips">
+            ${[...new Set([...(state.settings.parties || []), ...(e.inspection?.parties || [])])].map((pt) => `<button type="button" class="chip-f party ${e.inspection?.parties?.includes(pt) ? 'on' : ''}" data-action="toggle-party" data-party="${esc(pt)}">${esc(pt)}</button>`).join('')}
+            <button type="button" class="chip-f" data-action="add-party">${icon('plus')} Other</button>
+          </div>
+        </div>
+      </div>
+
       <fieldset class="locbox">
         <legend>${icon('pin')} Location on board</legend>
         ${showLast ? `<button type="button" class="chip last-loc" data-action="use-last-loc">Same as last: ${esc(fmtLoc(last))}</button>` : ''}
         <div class="loc-grid">
           ${LOC_FIELDS.map((f) => `
             <div class="field">
-              <label for="f-${f.key}">${f.label}</label>
+              <label for="f-${f.key}">${f.label}${f.key === 'room' && areaList(e.shipId).length ? ` <button type="button" class="link-btn" data-action="pick-area">${icon('list')} List</button>` : ''}</label>
               <input id="f-${f.key}" name="loc-${f.key}" value="${esc(e.location[f.key])}" placeholder="${f.ph}" list="dl-${f.key}" autocomplete="off" enterkeyhint="next">
               <datalist id="dl-${f.key}">${hints[f.key].map((v) => `<option value="${esc(v)}">`).join('')}</datalist>
             </div>`).join('')}
@@ -1183,6 +1233,10 @@ function collectDraft() {
   e.time = f.elements.time.value || hhmm(new Date());
   LOC_FIELDS.forEach((lf) => { e.location[lf.key] = f.elements[`loc-${lf.key}`].value.trim(); });
   e.company = f.elements.company.value.trim();
+  e.inspection = f.elements.isInspection.checked ? {
+    result: f.elements.inspResult.value || '',
+    parties: $$('.party-chips .party.on', f).map((b) => b.dataset.party),
+  } : null;
 }
 
 function saveDraftLocal() {
@@ -1270,6 +1324,26 @@ async function closeEditor() {
   const d = state.draft;
   if (d?.dirty && !confirm('Discard this entry/changes?')) return;
   await discardDraft();
+}
+
+/* ------------------------------------------------------------------ */
+/* Velger for faste tanker/rom                                         */
+/* ------------------------------------------------------------------ */
+
+function openAreaPicker() {
+  const d = state.draft;
+  if (!d) return;
+  collectDraft();
+  const list = areaList(d.entry.shipId);
+  const dlg = $('#sheet');
+  dlg.innerHTML = `
+    <div class="sheet area-sheet">
+      <h2>${icon('list')} Tanks and rooms</h2>
+      <input type="search" placeholder="Search, e.g. DB 1" data-input="area-search" autocomplete="off">
+      <div class="area-picks">${list.map((a) => `<button type="button" class="area-pick ${a === d.entry.location.room ? 'on' : ''}" data-action="choose-area" data-area="${esc(a)}">${esc(a)}</button>`).join('')}</div>
+      <button class="btn ghost" data-action="close-sheet">Cancel</button>
+    </div>`;
+  if (!dlg.open) dlg.showModal();
 }
 
 /* ------------------------------------------------------------------ */
@@ -1403,6 +1477,43 @@ const ACTIONS = {
   'report-ship': (el) => { state.reportShip = el.dataset.ship; render(); },
   'gallery-ship': (el) => { state.galleryShip = el.dataset.ship; state.galleryArea = 'all'; render(); },
   'gallery-area': (el) => { state.galleryArea = el.dataset.key; render(); },
+  'rename-area': async (el) => {
+    const to = prompt(`Rename “${el.dataset.name}” to:`, el.dataset.name)?.trim();
+    if (!to || to === el.dataset.name) return;
+    const all = (await db.getAllBy('entries', 'shipId', el.dataset.ship)).map(normalize)
+      .filter((e) => sync.areaOf(e.location).key === el.dataset.key);
+    const now = Date.now();
+    await db.putMany('entries', all.map((e) => ({ ...e, location: { ...e.location, room: to }, updatedAt: now })));
+    state.galleryArea = sync.areaOf({ room: to }).key;
+    toast(`Renamed ${all.length} ${all.length === 1 ? 'entry' : 'entries'} to “${to}”`);
+    afterLocalChange();
+    render();
+  },
+  'copy-areas': async (el) => {
+    state.settings.areas = { ...(state.settings.areas || {}), [el.dataset.to]: [...areaList(el.dataset.from)] };
+    state.settings.areasUpdatedAt = Date.now();
+    await saveSettings();
+    toast('List copied');
+    render();
+  },
+  'pick-area': () => openAreaPicker(),
+  'choose-area': (el) => {
+    $('#f-room').value = el.dataset.area;
+    $('#sheet').close();
+    saveDraftLocal();
+  },
+  'toggle-party': (el) => { el.classList.toggle('on'); saveDraftLocal(); },
+  'add-party': async (el) => {
+    const name = prompt('Who attended?')?.trim();
+    if (!name) return;
+    if (!(state.settings.parties || []).includes(name)) {
+      state.settings.parties = [...(state.settings.parties || []), name];
+      state.settings.partiesUpdatedAt = Date.now();
+      await saveSettings();
+    }
+    el.insertAdjacentHTML('beforebegin', `<button type="button" class="chip-f party on" data-action="toggle-party" data-party="${esc(name)}">${esc(name)}</button>`);
+    saveDraftLocal();
+  },
   'copy-title': async (el) => { toast(await copyText(el.dataset.title) ? 'Title copied' : 'Could not copy'); },
   'pick-company': (el) => {
     const input = $('#f-company');
@@ -1564,6 +1675,7 @@ const ACTIONS = {
 const CHANGES = {
   'pick-date': (el) => { if (el.value) { state.date = el.value > today() ? today() : el.value; render(); } },
   'ship-select': async (el) => { state.settings.activeShip = el.value; await saveSettings(); render(); },
+  'toggle-insp': (el) => { $('.insp-fields', editorEl()).hidden = !el.checked; },
   'add-photos': async (el) => { const files = [...el.files]; el.value = ''; await addFilesToDraft(files); },
   stamp: async (el) => { state.settings.stampPhotos = el.checked; await saveSettings(); toast('Saved'); },
   import: async (el) => { const f = el.files[0]; el.value = ''; if (f) await importBackup(f); },
@@ -1572,9 +1684,11 @@ const CHANGES = {
     el.value = '';
     if (!f) return;
     try {
-      const { changed } = await sync.importFromPc(f, state.settings);
+      const res = await sync.importFromPc(f, state.settings);
+      const { changed } = res;
       await saveSettings();
-      toast(changed ? `${changed} ${changed === 1 ? 'change' : 'changes'} from PC` : 'Already up to date');
+      const { confirmed } = res;
+      toast([changed && `${changed} ${changed === 1 ? 'change' : 'changes'} from PC`, confirmed && `${confirmed} confirmed`].filter(Boolean).join(' · ') || 'Already up to date');
       render();
     } catch (err) {
       alert(err.message);
@@ -1602,6 +1716,17 @@ function bindEvents() {
   document.addEventListener('change', (ev) => {
     const el = ev.target;
     if (el.dataset.change && CHANGES[el.dataset.change]) CHANGES[el.dataset.change](el);
+    if (el.dataset.areas) {
+      const list = [...new Set(el.value.split('\n').map((x) => x.trim()).filter(Boolean))];
+      state.settings.areas = { ...(state.settings.areas || {}), [el.dataset.areas]: list };
+      state.settings.areasUpdatedAt = Date.now();
+      saveSettings().then(() => toast(`${list.length} tanks/rooms saved`));
+    }
+    if (el.dataset.parties) {
+      state.settings.parties = [...new Set(el.value.split('\n').map((x) => x.trim()).filter(Boolean))];
+      state.settings.partiesUpdatedAt = Date.now();
+      saveSettings().then(() => toast('Saved'));
+    }
     if (el.dataset.setting) {
       state.settings[el.dataset.setting] = el.value.trim();
       saveSettings().then(() => toast('Saved'));
@@ -1618,6 +1743,10 @@ function bindEvents() {
     if (el.closest('[data-editor]')) saveDraftLocal();
     if (el.dataset.input === 'summary') saveSummaryText(el.dataset.key, el.value);
     if (el.classList.contains('crew-count')) updateCrewTotal();
+    if (el.dataset.input === 'area-search') {
+      const q = el.value.trim().toLowerCase().replace(/\s+/g, '');
+      $$('.area-pick').forEach((b) => { b.hidden = q && !b.dataset.area.toLowerCase().replace(/\s+/g, '').includes(q); });
+    }
     if (el.dataset.input === 'week-query') { state.weekQuery = el.value; renderWeekFeed(); }
   });
 
@@ -1679,6 +1808,7 @@ function bindEvents() {
 
 async function init() {
   await loadSettings();
+  if (!sync.canUseFolder()) await sync.migrateConfirmations().catch(() => {});
   if (isDesktop()) state.view = 'week'; // PC: start på ukeoversikten
   bindEvents();
   await render();
