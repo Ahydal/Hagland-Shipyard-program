@@ -445,9 +445,10 @@ export async function syncFolder(settings, h) {
     else await db.del('meta', `out:${k}`);
     days++;
   }
+  const areas = await writeAreas(root, settings, h);
   const snapshot = await writeSnapshot(root, settings);
   await db.put('meta', { key: 'lastSync', at: Date.now() });
-  return { imported: inbox.files, changed: inbox.changed, days, folder: root.name, snapshot };
+  return { imported: inbox.files, changed: inbox.changed, days, areas, folder: root.name, snapshot };
 }
 
 /* ------------------------------------------------------------------ */
@@ -510,4 +511,113 @@ export async function importFromPc(file, settings) {
   const changed = await applyBundle(data, settings, { markSent: true });
   await db.put('meta', { key: 'lastFromPc', at: data.createdAt || Date.now(), importedAt: Date.now() });
   return { changed, createdAt: data.createdAt };
+}
+
+/* ------------------------------------------------------------------ */
+/* Bilder sortert per område («By area»)                               */
+/* ------------------------------------------------------------------ */
+
+const BY_AREA = 'By area';
+const NO_AREA = 'No location';
+
+/** «DB1 PS», «db 1 ps» og «DB 1 PS» blir samme område: «DB 1 PS». */
+function canonArea(raw) {
+  const t = String(raw || '').trim()
+    .replace(/([A-Za-zÆØÅæøå])(\d)/g, '$1 $2')
+    .replace(/(\d)([A-Za-zÆØÅæøå])/g, '$1 $2')
+    .replace(/\s+/g, ' ');
+  return t ? t.charAt(0).toUpperCase() + t.slice(1) : '';
+}
+
+/**
+ * Området et bilde hører til: Room/tank, ellers Deck, ellers Section.
+ * @returns {{key:string, name:string}}
+ */
+export function areaOf(loc) {
+  let name = '';
+  if (loc?.room) name = canonArea(loc.room);
+  else if (loc?.deck) name = /^\d+$/.test(loc.deck.trim()) ? `Deck ${loc.deck.trim()}` : canonArea(loc.deck);
+  else if (loc?.section) name = `Section ${String(loc.section).trim()}`;
+  if (!name) name = NO_AREA;
+  return { key: name.toLowerCase(), name };
+}
+
+/** Visningsnavn per område: den skrivemåten som er brukt oftest (f.eks. «DB 1 PS» framfor «Db 1 ps»). */
+export function areaNames(entries) {
+  const count = new Map();
+  for (const e of entries) {
+    const { key, name } = areaOf(e.location);
+    if (!count.has(key)) count.set(key, new Map());
+    const m = count.get(key);
+    m.set(name, (m.get(name) || 0) + 1);
+  }
+  const out = new Map();
+  for (const [key, m] of count) out.set(key, [...m.entries()].sort((a, b) => b[1] - a[1])[0][0]);
+  return out;
+}
+export const NO_AREA_NAME = NO_AREA;
+
+/** Kopi av hvert bilde i <skip>/By area/<område>/. Flytter/sletter når område, skip eller tekst endres. */
+async function writeAreas(root, settings, h) {
+  const entries = await db.getAll('entries');
+  const names = areaNames(entries);
+  const meta = await db.getAll('meta');
+  const prev = new Map(meta.filter((m) => String(m.key).startsWith('area:')).map((m) => [m.key.slice(5), m]));
+  const wanted = new Map(); // photoId -> { ship, area, name }
+  const used = new Map(); // mappe -> sett med filnavn (unngå like navn)
+  for (const e of entries) {
+    const ship = settings.ships.find((x) => x.id === e.shipId);
+    if (!ship) continue;
+    const area = names.get(areaOf(e.location).key);
+    const time = (e.time || '').replace(':', '');
+    const text = (e.text || '').split('\n')[0].trim().slice(0, 50);
+    const base = safeName(`${e.date} ${time}${e.company ? ` ${e.company}` : ''}${text ? ` - ${text}` : ''}`, 110);
+    (e.photoIds || []).forEach((id, i) => {
+      const folder = `${safeName(ship.name)}/${safeName(area)}`;
+      if (!used.has(folder)) used.set(folder, new Set());
+      let name = `${base}${e.photoIds.length > 1 ? ` (${i + 1})` : ''}.jpg`;
+      for (let n = 2; used.get(folder).has(name); n++) name = `${base} (${i + 1}-${n}).jpg`;
+      used.get(folder).add(name);
+      wanted.set(id, { ship: safeName(ship.name), area: safeName(area), name });
+    });
+  }
+
+  const dirCache = new Map();
+  const areaDir = async (shipName, area, create) => {
+    const k = `${shipName}/${area}`;
+    if (dirCache.has(k)) return dirCache.get(k);
+    const shipDir = await root.getDirectoryHandle(shipName, { create });
+    const by = await shipDir.getDirectoryHandle(BY_AREA, { create });
+    const d = await by.getDirectoryHandle(area, { create });
+    dirCache.set(k, d);
+    return d;
+  };
+
+  let changed = 0;
+  // Fjern kopier som er flyttet eller slettet
+  for (const [id, rec] of prev) {
+    const w = wanted.get(id);
+    if (w && w.ship === rec.ship && w.area === rec.area && w.name === rec.name) continue;
+    try {
+      const d = await areaDir(rec.ship, rec.area, false);
+      await removeQuiet(d, rec.name);
+      const by = await (await root.getDirectoryHandle(rec.ship)).getDirectoryHandle(BY_AREA);
+      await removeQuiet(by, rec.area); // bare hvis tom
+      dirCache.delete(`${rec.ship}/${rec.area}`);
+    } catch { /* finnes ikke lenger */ }
+    if (!w) { await db.del('meta', `area:${id}`); changed++; }
+  }
+  // Skriv nye / flyttede
+  let n = 0;
+  for (const [id, w] of wanted) {
+    const rec = prev.get(id);
+    if (rec && rec.ship === w.ship && rec.area === w.area && rec.name === w.name) continue;
+    const p = await db.get('photos', id);
+    if (!p) continue;
+    if (++n % 10 === 0) h.onProgress?.(`Sorting photos by area (${n}) …`);
+    await writeFile(await areaDir(w.ship, w.area, true), w.name, p.blob);
+    await db.put('meta', { key: `area:${id}`, ...w });
+    changed++;
+  }
+  return changed;
 }
