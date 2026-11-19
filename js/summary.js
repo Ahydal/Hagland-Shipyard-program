@@ -29,7 +29,8 @@ Rules:
 - Keep it short and simple: about 4-7 short paragraphs and roughly 80-200 words in total. Leave out minor details and routine items.
 - Plain text only. No markdown, no bullets, no bold. Separate paragraphs with one blank line.
 - Start each paragraph with a short topic, area or subcontractor followed by a colon. Merge related notes into one paragraph that states the status at the end of the week.
-- Add "Findings:" and "Concerns:" paragraphs only when the notes support them.
+- Notes marked [INSPECTION ...] are inspections with their result and who attended. Summarise them in an "Inspections:" paragraph (what was inspected, by whom, result). Rejected inspections and inspections accepted with comments also belong under "Findings:".
+- Add "Inspections:", "Findings:" and "Concerns:" paragraphs only when the notes support them.
 - Formal, factual, full sentences with correct English shipbuilding terminology.
 - Do not add facts, numbers, names or judgements that are not in the notes. If there are no notes, write "No notes recorded this week."
 - Output only the description text, with no title, greeting or closing remarks.`;
@@ -62,6 +63,7 @@ Rules:
 - Under each heading write 1-3 short, factual sentences describing that company's work today, based only on its notes. Present tense ("is in progress") for ongoing work, past tense for completed work.
 - If a company has manpower but no notes, write only the heading line.
 - Notes without a company: place them under the company they clearly belong to; otherwise put them in a final block with the heading "General".
+- Notes marked [INSPECTION ...] are inspections: state clearly what was inspected, who attended and the result (e.g. "Tank No. 4 DB SB was inspected by Class and the owner and rejected.").
 - Use correct English shipbuilding terminology. Mention locations only when they add value.
 - Do not add facts, numbers, names or judgements that are not in the notes.
 - End with a blank line and the sign-off exactly as given in the notes ("Kind regards," and the lines after it).
@@ -96,12 +98,24 @@ function locEn(loc) {
   return p.join(', ');
 }
 
+const RESULT_EN = { accepted: 'Accepted', comments: 'Accepted with comments', rejected: 'Rejected' };
+export const resultLabel = (r) => RESULT_EN[r] || '';
+
+function inspectionTag(e) {
+  const i = e.inspection;
+  if (!i) return '';
+  const bits = ['INSPECTION'];
+  if (i.result) bits.push(resultLabel(i.result));
+  if (i.parties?.length) bits.push(`attended by ${i.parties.join(', ')}`);
+  return `[${bits.join(' – ')}] `;
+}
+
 function noteLine(e, { withCompany = true } = {}) {
   const parts = [e.time];
   if (withCompany && e.company) parts.push(e.company);
   const loc = locEn(e.location);
   if (loc) parts.push(loc);
-  parts.push((e.text || '').replace(/\s*\n\s*/g, ' / ').trim() || '(photo only, no text)');
+  parts.push(inspectionTag(e) + ((e.text || '').replace(/\s*\n\s*/g, ' / ').trim() || '(photo only, no text)'));
   const n = e.photoIds?.length || 0;
   return `- ${parts.join(' | ')}${n ? ` [${n} photo${n > 1 ? 's' : ''}]` : ''}`;
 }

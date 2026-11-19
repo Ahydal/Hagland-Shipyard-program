@@ -42,14 +42,23 @@ export function safeName(s, max = 90) {
 /* ------------------------------------------------------------------ */
 
 const isUnsent = (e) => !e.sentAt || (e.updatedAt || 0) > e.sentAt;
+/** Ikke bekreftet av PC-en ennå (bekreftes når iPhone henter «From PC»-fila). */
+const isUnconfirmed = (e) => !e.confirmedAt || (e.updatedAt || 0) > e.confirmedAt;
+
+/** Innstillinger som deles mellom iPhone og PC (skip, faste områder, inspeksjonsparter). */
+export const sharedSettings = (st) => ({
+  ships: st.ships, shipsUpdatedAt: st.shipsUpdatedAt || 0,
+  areas: st.areas || {}, areasUpdatedAt: st.areasUpdatedAt || 0,
+  parties: st.parties || null, partiesUpdatedAt: st.partiesUpdatedAt || 0,
+});
 
 export async function getTombstones() {
   return (await db.get('meta', 'tombstones'))?.list || [];
 }
 
-/** Husk slettinger av registreringer som allerede er sendt, så PC-en også fjerner dem. */
+/** Husk slettinger av registreringer som allerede er sendt, så PC-en også fjerner dem (til PC-en har bekreftet). */
 export async function addTombstone(entry) {
-  if (!entry?.sentAt) return;
+  if (!entry?.sentAt && !entry?.confirmedAt) return;
   const list = await getTombstones();
   list.push({ id: entry.id, shipId: entry.shipId, date: entry.date, deletedAt: Date.now() });
   await db.put('meta', { key: 'tombstones', list });
@@ -58,24 +67,36 @@ export async function addTombstone(entry) {
 const isCrew = (m) => String(m.key).startsWith('crew:');
 export const allCrew = async () => (await db.getAll('meta')).filter(isCrew);
 
+/** Antall endringer som aldri er sendt (vises på «Send»-knappen). */
 export async function pendingCount() {
   const entries = await db.getAll('entries');
   const crew = (await allCrew()).filter(isUnsent);
-  return entries.filter(isUnsent).length + crew.length + (await getTombstones()).length;
+  return entries.filter(isUnsent).length + crew.length + (await getTombstones()).filter((t) => !t.sentAt).length;
 }
 
-/** Lager pakkefil med alt som ikke er sendt. */
+/** Sendt, men ikke bekreftet av PC-en ennå. Tas automatisk med i neste sending. */
+export async function unconfirmedCount() {
+  const entries = (await db.getAll('entries')).filter((e) => !isUnsent(e) && isUnconfirmed(e));
+  const crew = (await allCrew()).filter((c) => !isUnsent(c) && isUnconfirmed(c));
+  return entries.length + crew.length + (await getTombstones()).filter((t) => t.sentAt).length;
+}
+
+/**
+ * Lager pakkefil med alt som ikke er bekreftet av PC-en: nye endringer, og det som er sendt før
+ * men kanskje aldri kom fram. PC-en hopper over det den allerede har.
+ */
 export async function buildBundle(settings) {
   const createdAt = Date.now();
-  const entries = (await db.getAll('entries')).filter(isUnsent);
+  const entries = (await db.getAll('entries')).filter(isUnconfirmed);
   const tombstones = await getTombstones();
-  const crew = (await allCrew()).filter(isUnsent);
+  const crew = (await allCrew()).filter(isUnconfirmed);
+  const fresh = entries.filter(isUnsent).length + crew.filter(isUnsent).length + tombstones.filter((t) => !t.sentAt).length;
   const parts = [
     `{"app":"tilsynsdagbok","version":3,"kind":"send","createdAt":${createdAt},`,
-    `"settings":${JSON.stringify({ ships: settings.ships, shipsUpdatedAt: settings.shipsUpdatedAt || 0 })},`,
-    `"entries":${JSON.stringify(entries.map(({ sentAt, ...e }) => e))},`,
-    `"tombstones":${JSON.stringify(tombstones)},`,
-    `"crew":${JSON.stringify(crew.map(({ sentAt, ...c }) => c))},"photos":[`,
+    `"settings":${JSON.stringify(sharedSettings(settings))},`,
+    `"entries":${JSON.stringify(entries.map(({ sentAt, confirmedAt, ...e }) => e))},`,
+    `"tombstones":${JSON.stringify(tombstones.map(({ sentAt, ...t }) => t))},`,
+    `"crew":${JSON.stringify(crew.map(({ sentAt, confirmedAt, ...c }) => c))},"photos":[`,
   ];
   let first = true;
   for (const e of entries) {
@@ -99,6 +120,7 @@ export async function buildBundle(settings) {
     tombstoneIds: tombstones.map((t) => t.id),
     crewKeys: crew.map((c) => c.key),
     count: entries.length + tombstones.length + crew.length,
+    fresh,
   };
 }
 
@@ -116,8 +138,9 @@ export async function markSent(bundle) {
     if (c && (c.updatedAt || 0) <= bundle.createdAt) crew.push({ ...c, sentAt: bundle.createdAt });
   }
   if (crew.length) await db.putMany('meta', crew);
-  const left = (await getTombstones()).filter((t) => !bundle.tombstoneIds.includes(t.id));
-  await db.put('meta', { key: 'tombstones', list: left });
+  // Slettinger beholdes til PC-en har bekreftet dem, men merkes som sendt
+  const list = (await getTombstones()).map((t) => (bundle.tombstoneIds.includes(t.id) ? { ...t, sentAt: bundle.createdAt } : t));
+  await db.put('meta', { key: 'tombstones', list });
   await db.put('meta', { key: 'lastSent', at: bundle.createdAt });
 }
 
@@ -164,7 +187,8 @@ export async function applyBundle(data, settings, { markSent = false } = {}) {
     if (cur && (cur.updatedAt || 0) === (e.updatedAt || 0)) { same.add(e.id); continue; }
     const { sentAt, ...clean } = e;
     // Fra PC til iPhone: merk som sendt, så det ikke sendes tilbake igjen
-    await db.put('entries', markSent ? { ...clean, sentAt: clean.updatedAt || Date.now() } : clean);
+    const { confirmedAt, ...clean2 } = clean;
+    await db.put('entries', markSent ? { ...clean2, sentAt: clean2.updatedAt || Date.now(), confirmedAt: clean2.updatedAt || Date.now() } : clean2);
     accepted.add(e.id);
     changed++;
     // Fjern bilder som er tatt ut av registreringen
@@ -184,8 +208,8 @@ export async function applyBundle(data, settings, { markSent = false } = {}) {
     if (!isCrew(c)) continue;
     const cur = await db.get('meta', c.key);
     if (cur && (cur.updatedAt || 0) >= (c.updatedAt || 0)) continue;
-    const { sentAt, ...clean } = c;
-    await db.put('meta', markSent ? { ...clean, sentAt: clean.updatedAt || Date.now() } : clean);
+    const { sentAt, confirmedAt, ...clean } = c;
+    await db.put('meta', markSent ? { ...clean, sentAt: clean.updatedAt || Date.now(), confirmedAt: clean.updatedAt || Date.now() } : clean);
     changed++;
   }
 
@@ -194,7 +218,7 @@ export async function applyBundle(data, settings, { markSent = false } = {}) {
     if (cur && (cur.updatedAt || 0) <= t.deletedAt) { await db.deleteEntry(t.id); changed++; }
   }
 
-  // Skipsnavn: bruk det som er sist endret
+  // Delte innstillinger: bruk det som er sist endret
   const s = data.settings;
   if (s?.ships && (s.shipsUpdatedAt || 0) > (settings.shipsUpdatedAt || 0)) {
     s.ships.forEach((ship) => {
@@ -202,6 +226,14 @@ export async function applyBundle(data, settings, { markSent = false } = {}) {
       if (local) Object.assign(local, ship); else settings.ships.push(ship);
     });
     settings.shipsUpdatedAt = s.shipsUpdatedAt;
+  }
+  if (s?.areas && (s.areasUpdatedAt || 0) > (settings.areasUpdatedAt || 0)) {
+    settings.areas = s.areas;
+    settings.areasUpdatedAt = s.areasUpdatedAt;
+  }
+  if (s?.parties && (s.partiesUpdatedAt || 0) > (settings.partiesUpdatedAt || 0)) {
+    settings.parties = s.parties;
+    settings.partiesUpdatedAt = s.partiesUpdatedAt;
   }
   return changed;
 }
@@ -333,6 +365,13 @@ async function buildDocx(ship, date, entries, photosById, crew, fmtLoc, fmtLong)
       heading: HeadingLevel.HEADING_2,
       spacing: { before: 280 },
       children: [new TextRun(`${e.time}${e.company ? `  ·  ${e.company}` : ''}${loc ? `  ·  ${loc}` : ''}`)],
+    }));
+    if (e.inspection) children.push(new Paragraph({
+      children: [new TextRun({
+        text: `Inspection${e.inspection.result ? `: ${({ accepted: 'Accepted', comments: 'Accepted with comments', rejected: 'Rejected' })[e.inspection.result]}` : ''}${e.inspection.parties?.length ? ` (attended by ${e.inspection.parties.join(', ')})` : ''}`,
+        bold: true,
+        color: e.inspection.result === 'rejected' ? 'B91C1C' : e.inspection.result === 'accepted' ? '15803D' : 'B45309',
+      })],
     }));
     for (const line of (e.text || '').split('\n')) {
       if (line.trim()) children.push(new Paragraph({ children: [new TextRun(line)] }));
@@ -475,16 +514,16 @@ async function writeSnapshot(root, settings) {
   const sig = [
     entries.map((e) => `${e.id}:${e.updatedAt || 0}`).sort().join(','),
     crew.map((c) => `${c.key}:${c.updatedAt || 0}`).sort().join(','),
-    tombstones.length, JSON.stringify(settings.ships),
+    tombstones.length, JSON.stringify(sharedSettings(settings)),
   ].join('|');
   if ((await db.get('meta', 'snapshotSig'))?.sig === sig) return false;
 
   const createdAt = Date.now();
   const parts = [
     `{"app":"tilsynsdagbok","version":3,"kind":"pc-snapshot","createdAt":${createdAt},`,
-    `"settings":${JSON.stringify({ ships: settings.ships, shipsUpdatedAt: settings.shipsUpdatedAt || 0 })},`,
-    `"entries":${JSON.stringify(entries.map(({ sentAt, ...e }) => e))},`,
-    `"crew":${JSON.stringify(crew.map(({ sentAt, ...c }) => c))},`,
+    `"settings":${JSON.stringify(sharedSettings(settings))},`,
+    `"entries":${JSON.stringify(entries.map(({ sentAt, confirmedAt, ...e }) => e))},`,
+    `"crew":${JSON.stringify(crew.map(({ sentAt, confirmedAt, ...c }) => c))},`,
     `"tombstones":${JSON.stringify(tombstones)},"photos":[`,
   ];
   let first = true;
@@ -509,8 +548,32 @@ export async function importFromPc(file, settings) {
   try { data = JSON.parse(await file.text()); } catch { throw new Error('This is not a valid file.'); }
   if (data?.app !== 'tilsynsdagbok') throw new Error('This file is not from Site Diary.');
   const changed = await applyBundle(data, settings, { markSent: true });
+
+  // Bekreft alt PC-en har (samme eller nyere versjon) – det trenger ikke sendes igjen
+  const pcEntries = new Map((data.entries || []).map((e) => [e.id, e.updatedAt || 0]));
+  const confirmed = [];
+  for (const e of await db.getAll('entries')) {
+    const pc = pcEntries.get(e.id);
+    if (pc !== undefined && pc >= (e.updatedAt || 0) && isUnconfirmed(e)) {
+      confirmed.push({ ...e, sentAt: Math.max(e.sentAt || 0, e.updatedAt || 0), confirmedAt: e.updatedAt || Date.now() });
+    }
+  }
+  if (confirmed.length) await db.putMany('entries', confirmed);
+  const pcCrew = new Map((data.crew || []).map((c) => [c.key, c.updatedAt || 0]));
+  const crewOk = [];
+  for (const c of await allCrew()) {
+    const pc = pcCrew.get(c.key);
+    if (pc !== undefined && pc >= (c.updatedAt || 0) && isUnconfirmed(c)) {
+      crewOk.push({ ...c, sentAt: Math.max(c.sentAt || 0, c.updatedAt || 0), confirmedAt: c.updatedAt || Date.now() });
+    }
+  }
+  if (crewOk.length) await db.putMany('meta', crewOk);
+  // Slettinger er bekreftet når PC-fila er nyere enn slettingen og ikke har registreringen
+  const left = (await getTombstones()).filter((t) => pcEntries.has(t.id) || (data.createdAt || 0) < t.deletedAt);
+  await db.put('meta', { key: 'tombstones', list: left });
+
   await db.put('meta', { key: 'lastFromPc', at: data.createdAt || Date.now(), importedAt: Date.now() });
-  return { changed, createdAt: data.createdAt };
+  return { changed, confirmed: confirmed.length + crewOk.length, createdAt: data.createdAt };
 }
 
 /* ------------------------------------------------------------------ */
@@ -620,4 +683,19 @@ async function writeAreas(root, settings, h) {
     changed++;
   }
   return changed;
+}
+
+/**
+ * Engangs-overgang: registreringer sendt før bekreftelse fantes. Det som ble sendt for mer enn
+ * to døgn siden regnes som levert; det nyere tas med i neste sending.
+ */
+export async function migrateConfirmations() {
+  if (await db.get('meta', 'confirmMigrated')) return;
+  const cutoff = Date.now() - 2 * 864e5;
+  const ok = (x) => x.sentAt && !x.confirmedAt && x.sentAt < cutoff && (x.updatedAt || 0) <= x.sentAt;
+  const entries = (await db.getAll('entries')).filter(ok).map((e) => ({ ...e, confirmedAt: e.updatedAt || e.sentAt }));
+  if (entries.length) await db.putMany('entries', entries);
+  const crew = (await allCrew()).filter(ok).map((c) => ({ ...c, confirmedAt: c.updatedAt || c.sentAt }));
+  if (crew.length) await db.putMany('meta', crew);
+  await db.put('meta', { key: 'confirmMigrated', at: Date.now() });
 }
