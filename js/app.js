@@ -2,7 +2,7 @@ import * as db from './db.js';
 import * as summary from './summary.js';
 import * as sync from './sync.js';
 
-const APP_VERSION = '3.2.0';
+const APP_VERSION = '3.3.0';
 
 /* ------------------------------------------------------------------ */
 /* Konstanter                                                          */
@@ -340,6 +340,27 @@ function entryCard(e, { showShip = false } = {}) {
   </article>`;
 }
 
+/** Bilder gruppert per uke (nyeste først). items er allerede sortert nyest først. */
+function photoWeeks(items) {
+  const short = (d) => parseISODate(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+  const weeks = [];
+  items.forEach((x, i) => {
+    const mon = mondayOf(x.e.date);
+    if (!weeks.length || weeks[weeks.length - 1].mon !== mon) weeks.push({ mon, list: [] });
+    weeks[weeks.length - 1].list.push({ ...x, i });
+  });
+  return weeks.map((w) => {
+    const sun = addDays(w.mon, 6);
+    return `
+    <h3 class="week-head">Week ${isoWeek(w.mon)} <span class="muted">· ${short(w.mon)} – ${short(sun)} ${parseISODate(sun).getFullYear()} · ${w.list.length} ${w.list.length === 1 ? 'photo' : 'photos'}</span></h3>
+    <div class="gallery big">${w.list.map((x) => `
+      <figure data-action="view-photo" data-gallery="1" data-index="${x.i}">
+        <img data-photo="${x.id}" alt="" loading="lazy">
+        <figcaption><b>${fmtNum(x.e.date)} ${esc(x.e.time)}</b>${x.e.company ? ` · ${esc(x.e.company)}` : ''}<br>${esc((x.e.text || '').split('\n')[0].slice(0, 90))}</figcaption>
+      </figure>`).join('')}</div>`;
+  }).join('');
+}
+
 const VIEWS = {
   async day() {
     if (!sync.canUseFolder()) state.pending = await sync.pendingCount();
@@ -574,11 +595,7 @@ const VIEWS = {
         </nav>
         <div class="card">
           <h2>${esc(sel ? sel.name : 'All photos')} <span class="muted small">(${items.length})</span></h2>
-          ${items.length ? `<div class="gallery big">${items.map((x, i) => `
-            <figure data-action="view-photo" data-gallery="1" data-index="${i}">
-              <img data-photo="${x.id}" alt="" loading="lazy">
-              <figcaption><b>${fmtNum(x.e.date)} ${esc(x.e.time)}</b>${x.e.company ? ` · ${esc(x.e.company)}` : ''}<br>${esc((x.e.text || '').split('\n')[0].slice(0, 90))}</figcaption>
-            </figure>`).join('')}</div>` : '<p class="muted">No photos yet.</p>'}
+          ${items.length ? photoWeeks(items) : '<p class="muted">No photos yet.</p>'}
         </div>
       </div>
     </section>`;
