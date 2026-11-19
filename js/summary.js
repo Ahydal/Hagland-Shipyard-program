@@ -28,7 +28,7 @@ Rules:
 - Give a general overview of the whole week: main progress, important issues and what is outstanding. Do NOT go through the week day by day and do not mention dates or weekdays.
 - Keep it short and simple: about 4-7 short paragraphs and roughly 80-200 words in total. Leave out minor details and routine items.
 - Plain text only. No markdown, no bullets, no bold. Separate paragraphs with one blank line.
-- Start each paragraph with a short topic, area or subcontractor followed by a colon. Merge related notes into one paragraph that states the status at the end of the week.
+- Start each paragraph with a short topic, area, section, equipment/system or subcontractor followed by a colon (e.g. "Main Engine (ME):", "Section 120:"). Merge related notes into one paragraph that states the status at the end of the week.
 - Notes marked [INSPECTION ...] are inspections with their result and who attended. Summarise them in an "Inspections:" paragraph (what was inspected, by whom, result). Rejected inspections and inspections accepted with comments also belong under "Findings:".
 - Add "Inspections:", "Findings:" and "Concerns:" paragraphs only when the notes support them.
 - Formal, factual, full sentences with correct English shipbuilding terminology.
@@ -95,6 +95,7 @@ function locEn(loc) {
   if (loc.frame) p.push(`frame ${loc.frame}`);
   if (loc.deck) p.push(/^\d+$/.test(loc.deck) ? `deck ${loc.deck}` : loc.deck);
   if (loc.room) p.push(loc.room);
+  if (loc.equipment) p.push(`equipment: ${loc.equipment}`);
   return p.join(', ');
 }
 
