@@ -2,7 +2,7 @@ import * as db from './db.js';
 import * as summary from './summary.js';
 import * as sync from './sync.js';
 
-const APP_VERSION = '3.0.0';
+const APP_VERSION = '3.2.0';
 
 /* ------------------------------------------------------------------ */
 /* Konstanter                                                          */
@@ -24,7 +24,7 @@ const LOC_FIELDS = [
   { key: 'section', label: 'Section', ph: 'e.g. 210', defaults: [] },
   { key: 'frame', label: 'Frame', ph: 'e.g. 42–45', defaults: [] },
   { key: 'deck', label: 'Deck', ph: 'e.g. Deck 2', defaults: ['Tank top', 'Deck 1', 'Deck 2', 'Deck 3', 'Main deck', 'Bridge deck'] },
-  { key: 'room', label: 'Room', ph: 'e.g. Engine room', defaults: ['Engine room', 'Wheelhouse', 'Cargo hold', 'Pump room', 'Switchboard room', 'Workshop', 'Mess room', 'Galley', 'Cabin', 'Steering gear room'] },
+  { key: 'room', label: 'Room / tank', ph: 'e.g. DB 1 PS', defaults: ['Engine room', 'Wheelhouse', 'Cargo hold', 'Pump room', 'Switchboard room', 'Workshop', 'Mess room', 'Galley', 'Cabin', 'Steering gear room'] },
 ];
 const emptyLoc = () => ({ section: '', frame: '', deck: '', room: '' });
 
@@ -172,6 +172,9 @@ const state = {
   weekShip: 'all',
   weekQuery: '',
   weekPhotoOrder: [],
+  galleryShip: null,
+  galleryArea: 'all',
+  galleryOrder: [],
   aiBusy: false,
   pending: 0,
   sync: { root: null, perm: null, running: false, msg: '', lastAt: 0, error: '' },
@@ -277,12 +280,13 @@ function renderTopbar() {
       <button class="${state.view === 'week' ? 'on' : ''}" data-action="nav" data-view="week">${icon('calendar')} Week</button>
       <button class="${state.view === 'day' ? 'on' : ''}" data-action="nav" data-view="day">${icon('camera')} Diary</button>
       <button class="${state.view === 'dayreport' ? 'on' : ''}" data-action="nav" data-view="dayreport">${icon('report')} Daily report</button>
+      <button class="${state.view === 'photos' ? 'on' : ''}" data-action="nav" data-view="photos">${icon('image')} Photos</button>
     </nav>`;
   const gear = `<button class="icon-btn" data-action="nav" data-view="settings" aria-label="Settings">${icon('gear')}</button>`;
-  if (state.view === 'week' || state.view === 'dayreport') {
+  if (state.view === 'week' || state.view === 'dayreport' || state.view === 'photos') {
     $('#topbar').innerHTML = `
       <button class="icon-btn mobile-only" data-action="nav" data-view="day" aria-label="Back">${icon('left')}</button>
-      <h1 class="topbar-title mobile-only">${state.view === 'week' ? 'Weekly report' : 'Daily report'}</h1>
+      <h1 class="topbar-title mobile-only">${({ week: 'Weekly report', dayreport: 'Daily report', photos: 'Photos' })[state.view]}</h1>
       ${tabs}
       <span class="spacer"></span>
       ${gear}`;
@@ -311,7 +315,7 @@ async function render() {
   const html = await VIEWS[state.view]();
   if (token !== renderToken) return;
   const main = $('#main');
-  main.classList.toggle('wide', state.view === 'week' || state.view === 'dayreport');
+  main.classList.toggle('wide', ['week', 'dayreport', 'photos'].includes(state.view));
   main.innerHTML = html;
   hydrateThumbs(main);
   if (state.view === 'week') renderWeekFeed();
@@ -536,6 +540,45 @@ const VIEWS = {
             <h2>${esc(x.sh.name)} <span class="muted small">(${x.entries.length})</span></h2>
             ${x.entries.length ? `<div class="list">${x.entries.map((e) => entryCard(e)).join('')}</div>` : '<p class="muted">No entries.</p>'}
           </div>`).join('')}
+        </div>
+      </div>
+    </section>`;
+  },
+
+  async photos() {
+    const sh = state.settings.ships.find((x) => x.id === state.galleryShip) || ship();
+    const entries = (await db.getAllBy('entries', 'shipId', sh.id)).map(normalize).filter((e) => e.photoIds.length);
+    const names = sync.areaNames(entries);
+    const groups = new Map();
+    for (const e of entries) {
+      const key = sync.areaOf(e.location).key;
+      if (!groups.has(key)) groups.set(key, { key, name: names.get(key), items: [] });
+      e.photoIds.forEach((id) => groups.get(key).items.push({ id, e }));
+    }
+    const noArea = sync.NO_AREA_NAME.toLowerCase();
+    const list = [...groups.values()].sort((a, b) => (a.key === noArea) - (b.key === noArea) || a.name.localeCompare(b.name, 'en', { numeric: true }));
+    if (state.galleryArea !== 'all' && !groups.has(state.galleryArea)) state.galleryArea = 'all';
+    const sel = state.galleryArea === 'all' ? null : groups.get(state.galleryArea);
+    const items = (sel ? sel.items : list.flatMap((g) => g.items))
+      .sort((a, b) => (b.e.date + b.e.time).localeCompare(a.e.date + a.e.time));
+    state.galleryOrder = items.map((x) => x.id);
+    const total = list.reduce((n, g) => n + g.items.length, 0);
+    return `
+    <section class="view">
+      <div class="chips">${state.settings.ships.map((x) => `<button class="chip-f ${x.id === sh.id ? 'on' : ''}" data-action="gallery-ship" data-ship="${x.id}">${esc(x.name)}</button>`).join('')}</div>
+      <div class="gallery-layout">
+        <nav class="card area-list" aria-label="Areas">
+          <button class="area-item ${!sel ? 'on' : ''}" data-action="gallery-area" data-key="all">${icon('image')}<span>All photos</span><b>${total}</b></button>
+          ${list.map((g) => `<button class="area-item ${sel?.key === g.key ? 'on' : ''}" data-action="gallery-area" data-key="${esc(g.key)}">${icon('folder')}<span>${esc(g.name)}</span><b>${g.items.length}</b></button>`).join('')}
+          <p class="muted small">Areas come from “Room / tank”, then Deck, then Section. The same folders are in OneDrive under <b>${esc(sh.name)} → By area</b>.</p>
+        </nav>
+        <div class="card">
+          <h2>${esc(sel ? sel.name : 'All photos')} <span class="muted small">(${items.length})</span></h2>
+          ${items.length ? `<div class="gallery big">${items.map((x, i) => `
+            <figure data-action="view-photo" data-gallery="1" data-index="${i}">
+              <img data-photo="${x.id}" alt="" loading="lazy">
+              <figcaption><b>${fmtNum(x.e.date)} ${esc(x.e.time)}</b>${x.e.company ? ` · ${esc(x.e.company)}` : ''}<br>${esc((x.e.text || '').split('\n')[0].slice(0, 90))}</figcaption>
+            </figure>`).join('')}</div>` : '<p class="muted">No photos yet.</p>'}
         </div>
       </div>
     </section>`;
@@ -951,7 +994,7 @@ async function runSync({ quiet = false } = {}) {
     });
     if (JSON.stringify(state.settings.ships) !== shipsBefore) await saveSettings();
     s.lastAt = Date.now();
-    if (res.imported) {
+    if (res.imported || (res.areas && state.view === 'photos')) {
       toast(`Imported ${res.imported} ${res.imported === 1 ? 'package' : 'packages'} from iPhone`);
       if (!editorEl().open && !document.activeElement?.matches('textarea, input')) render();
     } else if (!quiet) {
@@ -1341,6 +1384,8 @@ const ACTIONS = {
   'send-onedrive': () => prepareSend(),
   'edit-crew': (el) => openCrewSheet(el.dataset.ship),
   'report-ship': (el) => { state.reportShip = el.dataset.ship; render(); },
+  'gallery-ship': (el) => { state.galleryShip = el.dataset.ship; state.galleryArea = 'all'; render(); },
+  'gallery-area': (el) => { state.galleryArea = el.dataset.key; render(); },
   'copy-title': async (el) => { toast(await copyText(el.dataset.title) ? 'Title copied' : 'Could not copy'); },
   'pick-company': (el) => {
     const input = $('#f-company');
@@ -1474,6 +1519,7 @@ const ACTIONS = {
     const i = Number(el.dataset.index);
     if (el.dataset.draft) return openLightbox(state.draft.photos.map((p) => p.id), i);
     if (el.dataset.week) return openLightbox(state.weekPhotoOrder, i);
+    if (el.dataset.gallery) return openLightbox(state.galleryOrder, i);
     const e = await db.get('entries', el.dataset.entry);
     if (e) openLightbox(e.photoIds, i);
   },

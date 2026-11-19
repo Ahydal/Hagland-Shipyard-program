@@ -10,39 +10,27 @@ const KEY_STORAGE = 'tilsyn-anthropic-key';
 const WEEK_INSTRUCTIONS = `You help a site supervisor (owner's representative) at a shipyard write the weekly report for ONE newbuilding vessel.
 You receive the supervisor's short field notes for one week, written in Norwegian or English. Each note has a date, a time and, when given, a subcontractor/company and a location on board (section, frame, deck, room).
 
-Write the "Description" text of the weekly report in English, to be pasted into Marine Manager.
+Write a short, general summary of the week in English for the "Description" field of the weekly report in Marine Manager.
 
 Style - follow this structure and tone (the content below is only an invented example):
 
-Example Yard Location:
+Steel and outfitting: Erection of the aft sections continued and sections 120 and 121 were accepted by Class. Pipe and cable installation is progressing in the engine room.
 
-Hatch Covers Nos. 2 and 3: The hatch covers were presented to Class and the owner for inspection. The pressure tests and final inspections were completed and accepted without comments.
+Hatch covers: Hatch covers Nos. 2 and 3 were pressure tested and accepted. Painting of the remaining covers is in progress.
 
-Hatch Covers Nos. 6 and 7: The first coat of paint has been applied.
+Main Engine (ME): The main engine has been delivered and the foundation has received its first coat of paint.
 
-Observation: The temperature inside the painting hall is too low and the humidity too high, which may affect the quality of the coating application.
+Findings: Surface preparation in several tanks did not meet the specification and has to be redone.
 
-Example Steel Subcontractor:
-
-Sections Nos. 120 and 121: The sections were inspected by Class and the site team. The construction was accepted.
-
-Findings: Sharp edges have not been properly treated in several locations within the technical areas.
-
-Main Engine (ME): The main engine has been delivered. The ME foundation has received its first coat of paint.
-
-Inspections: No official inspection invitations have been received.
-
-Concerns:
-
-Poor communication between subcontractors.
+Concerns: Progress remains behind schedule.
 
 Rules:
+- Give a general overview of the whole week: main progress, important issues and what is outstanding. Do NOT go through the week day by day and do not mention dates or weekdays.
+- Keep it short and simple: about 4-7 short paragraphs and roughly 80-200 words in total. Leave out minor details and routine items.
 - Plain text only. No markdown, no bullets, no bold. Separate paragraphs with one blank line.
-- Group the text under a heading line ending with ":" for each location or subcontractor when the notes make that clear. Otherwise group by system or area.
-- Start each paragraph with the item or topic followed by a colon (e.g. "Section 210:", "Main Engine (ME):", "Observation:", "Findings:").
-- Merge related notes from different days into one paragraph that states the current status at the end of the week.
-- Formal, factual, full sentences. Past tense for completed work, present tense for ongoing work. Correct English shipbuilding terminology.
-- Add "Inspections:" and "Concerns:" sections at the end only when the notes support them.
+- Start each paragraph with a short topic, area or subcontractor followed by a colon. Merge related notes into one paragraph that states the status at the end of the week.
+- Add "Findings:" and "Concerns:" paragraphs only when the notes support them.
+- Formal, factual, full sentences with correct English shipbuilding terminology.
 - Do not add facts, numbers, names or judgements that are not in the notes. If there are no notes, write "No notes recorded this week."
 - Output only the description text, with no title, greeting or closing remarks.`;
 
@@ -198,37 +186,44 @@ function explainError(err, Anthropic) {
   return err?.message || String(err);
 }
 
-export async function summarizeWithClaude(notes, kind = 'week') {
+async function client() {
   const apiKey = getApiKey();
   if (!apiKey) throw new Error('No API key. Add one under Settings.');
-
   let Anthropic;
   try {
     ({ default: Anthropic } = await import(SDK_URL));
   } catch {
     throw new Error('Could not load Claude. A network connection is required.');
   }
-
   // Nøkkelen er brukerens egen og ligger kun på denne enheten (én bruker, ingen server).
-  const client = new Anthropic({ apiKey, dangerouslyAllowBrowser: true, maxRetries: 2 });
+  return { Anthropic, c: new Anthropic({ apiKey, dangerouslyAllowBrowser: true, maxRetries: 2 }) };
+}
+
+async function ask({ system, content, maxTokens = 16000, refusalMsg }) {
+  const { Anthropic, c } = await client();
   let response;
   try {
-    response = await client.beta.messages.create({
+    response = await c.beta.messages.create({
       model: MODEL,
-      max_tokens: 16000,
+      max_tokens: maxTokens,
       betas: ['server-side-fallback-2026-07-01'],
       fallbacks: 'default',
-      system: INSTRUCTIONS[kind],
-      messages: [{ role: 'user', content: notes }],
+      system,
+      messages: [{ role: 'user', content }],
     });
   } catch (err) {
     throw new Error(explainError(err, Anthropic));
   }
-
-  if (response.stop_reason === 'refusal') {
-    throw new Error('Claude could not write this report. Try “Copy for Claude app” instead.');
-  }
+  if (response.stop_reason === 'refusal') throw new Error(refusalMsg);
   const text = response.content.filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
   if (!text) throw new Error('Got an empty answer from Claude. Try again.');
   return text;
+}
+
+export function summarizeWithClaude(notes, kind = 'week') {
+  return ask({
+    system: INSTRUCTIONS[kind],
+    content: notes,
+    refusalMsg: 'Claude could not write this report. Try “Copy for Claude app” instead.',
+  });
 }

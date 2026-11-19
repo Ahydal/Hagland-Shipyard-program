@@ -32,9 +32,13 @@ Appen er på engelsk. Knappenavnene under er de du ser i appen.
 **På PC:** når appen er åpen, henter den inn sendingene automatisk (hvert 2. minutt). Bilder og Word-dagbok («Daily log») havner i
 `<mappe>\<skip>\<dato>\`. Endringer du gjør på PC-en, skrives til `From PC` slik at iPhone kan hente dem.
 
+**Bilder per område:** fanen **«Photos»** på PC viser bildene sortert i mapper etter område. Området er «Room / tank» (f.eks. `DB 1 PS`),
+ellers Deck, ellers Section. `DB1 PS`, `db1 ps` og `DB 1 PS` havner i samme mappe. De samme mappene ligger i OneDrive under
+`<skip>\By area\<område>\`, og bildene flyttes dit automatisk hvis du endrer området.
+
 **Rapporter til Marine Manager** (lages per skip, på engelsk):
 - **Daily report:** «Good afternoon», så «<Firma> – N people on board» med korte setninger, og til slutt signatur. Navn og stilling legger du inn under Settings → Reports.
-- **Weekly report** (fanen «Week»): tekst til «Description»-feltet i MM, og ferdig tittel, for eksempel «NB 853. Week 47 (Nov 16, 2026 - Nov 22, 2026)».
+- **Weekly report** (fanen «Week»): en kort, generell oppsummering av uka (ikke dag for dag) til «Description»-feltet i MM, og ferdig tittel, for eksempel «NB 853. Week 47 (Nov 16, 2026 - Nov 22, 2026)».
 - Trykk **«Write with AI»** (krever API-nøkkel) eller **«Copy for Claude app»**, og så **«Copy text»**.
 
 Se [PLAN.md](PLAN.md) for detaljer og videre planer.
