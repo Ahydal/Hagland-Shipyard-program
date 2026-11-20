@@ -2,7 +2,7 @@ import * as db from './db.js';
 import * as summary from './summary.js';
 import * as sync from './sync.js';
 
-const APP_VERSION = '3.9.0';
+const APP_VERSION = '3.9.1';
 
 /* ------------------------------------------------------------------ */
 /* Konstanter                                                          */
@@ -226,8 +226,11 @@ function forgetThumb(id) {
   if (u) { URL.revokeObjectURL(u); thumbUrls.delete(id); }
 }
 function hydrateThumbs(root) {
-  $$('img[data-photo]:not([src])', root).forEach((img) => {
-    thumbUrl(img.dataset.photo).then((u) => { if (u) img.src = u; });
+  $$('img[data-photo]:not([src]):not(.missing)', root).forEach((img) => {
+    thumbUrl(img.dataset.photo).then((u) => {
+      if (u) img.src = u;
+      else { img.classList.add('missing'); img.alt = ''; img.title = 'Photo not received yet – it is sent again from the iPhone'; }
+    });
   });
 }
 
@@ -1006,6 +1009,7 @@ function oneDriveCard(inSettings = false) {
   } else {
     body = `<p class="sync-line">${icon('folder')} <b>${esc(s.root.name)}</b> · ${s.running ? esc(s.msg || 'Syncing …') : `synced ${fmtWhen(s.lastAt)}`}</p>
       ${s.error ? `<p class="error">${esc(s.error)}</p>` : ''}
+      ${s.missing ? `<p class="warn">⚠️ ${s.missing} ${s.missing === 1 ? 'photo has' : 'photos have'} not been received from the iPhone yet. On the iPhone: “Get from PC”, then “Send to OneDrive” – the missing photos are sent again.</p>` : ''}
       <div class="row">
         <button class="btn" data-action="sync-now" ${s.running ? 'disabled' : ''}>${icon('refresh')} Sync now</button>
         ${inSettings ? '<button class="btn ghost" data-action="pick-folder">Change folder</button>' : ''}
@@ -1118,6 +1122,7 @@ async function runSync({ quiet = false } = {}) {
     });
     if (JSON.stringify(state.settings.ships) !== shipsBefore) await saveSettings();
     s.lastAt = Date.now();
+    s.missing = res.missing || 0;
     if (res.imported || (res.areas && state.view === 'photos')) {
       toast(`Imported ${res.imported} ${res.imported === 1 ? 'package' : 'packages'} from iPhone`);
       if (!editorEl().open && !document.activeElement?.matches('textarea, input')) render();
@@ -1777,7 +1782,8 @@ const CHANGES = {
       const { changed } = res;
       await saveSettings();
       const { confirmed } = res;
-      toast([changed && `${changed} ${changed === 1 ? 'change' : 'changes'} from PC`, confirmed && `${confirmed} confirmed`].filter(Boolean).join(' · ') || 'Already up to date');
+      toast([changed && `${changed} ${changed === 1 ? 'change' : 'changes'} from PC`, confirmed && `${confirmed} confirmed`,
+        res.resendPhotos && `${res.resendPhotos} missing ${res.resendPhotos === 1 ? 'photo' : 'photos'} will be sent again`].filter(Boolean).join(' · ') || 'Already up to date');
       render();
     } catch (err) {
       alert(err.message);
@@ -1903,7 +1909,10 @@ function bindEvents() {
 
 async function init() {
   await loadSettings();
-  if (!sync.canUseFolder()) await sync.migrateConfirmations().catch(() => {});
+  if (!sync.canUseFolder()) {
+    await sync.migrateConfirmations().catch(() => {});
+    await sync.resetPhotoResend().catch(() => {});
+  }
   if (isDesktop()) state.view = 'week'; // PC: start på ukeoversikten
   bindEvents();
   await render();
