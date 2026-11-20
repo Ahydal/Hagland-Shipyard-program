@@ -85,24 +85,21 @@ export async function unconfirmedCount() {
  * Lager pakkefil med alt som ikke er bekreftet av PC-en: nye endringer, og det som er sendt før
  * men kanskje aldri kom fram. PC-en hopper over det den allerede har.
  */
+export const PART_LIMIT = 3_000_000; // tegn per del – mye større tekst får iOS sin del-meny til å henge
+
 export async function buildBundle(settings) {
   const createdAt = Date.now();
   const entries = (await db.getAll('entries')).filter(isUnconfirmed);
   const tombstones = await getTombstones();
   const crew = (await allCrew()).filter(isUnconfirmed);
   const fresh = entries.filter(isUnsent).length + crew.filter(isUnsent).length + tombstones.filter((t) => !t.sentAt).length;
-  const parts = [
-    `{"app":"tilsynsdagbok","version":3,"kind":"send","createdAt":${createdAt},`,
-    `"settings":${JSON.stringify(sharedSettings(settings))},`,
-    `"entries":${JSON.stringify(entries.map(({ sentAt, confirmedAt, photosSentAt, ...e }) => e))},`,
-    `"tombstones":${JSON.stringify(tombstones.map(({ sentAt, ...t }) => t))},`,
-    `"crew":${JSON.stringify(crew.map(({ sentAt, confirmedAt, ...c }) => c))},"photos":[`,
-  ];
-  let first = true;
-  const photoEntryIds = [];
+  const clean = (e) => { const { sentAt, confirmedAt, photosSentAt, ...x } = e; return x; };
+
   // Bilder: alltid for nye/endrede registreringer. For det som er sendt før men ikke bekreftet,
   // høyst én gang per døgn – ellers blir sendingene store og del-menyen/opplastingen treg.
   const RESEND_PHOTOS_AFTER = 24 * 3600e3;
+  const photoEntryIds = [];
+  const photos = []; // { entryId, json }
   for (const e of entries) {
     if (!isUnsent(e) && e.photosSentAt && createdAt - e.photosSentAt < RESEND_PHOTOS_AFTER) continue;
     if (e.photoIds?.length) photoEntryIds.push(e.id);
@@ -110,17 +107,35 @@ export async function buildBundle(settings) {
       const p = await db.get('photos', id);
       if (!p) continue;
       const { blob, thumb, ...rest } = p;
-      parts.push((first ? '' : ',') + JSON.stringify({ ...rest, blob: await blobToB64(blob), thumb: thumb ? await blobToB64(thumb) : null }));
-      first = false;
+      photos.push({ entryId: e.id, json: JSON.stringify({ ...rest, blob: await blobToB64(blob), thumb: thumb ? await blobToB64(thumb) : null }) });
     }
   }
-  parts.push(']}');
+
+  // Del opp i biter som hver er en fullstendig, selvstendig sending (alle sendes som tekst).
+  // Første bit har innstillinger, bemanning, slettinger og alle notater; bilder fordeles på bitene.
+  // En bit med bilder har også notatet bildene hører til, så den kan leses inn alene og i hvilken som helst rekkefølge.
+  const byId = new Map(entries.map((e) => [e.id, clean(e)]));
+  const groups = [[]];
+  let size = JSON.stringify([...byId.values()]).length + 20000;
+  for (const ph of photos) {
+    if (groups[groups.length - 1].length && size + ph.json.length > PART_LIMIT) { groups.push([]); size = 0; }
+    groups[groups.length - 1].push(ph);
+    size += ph.json.length;
+  }
+  const texts = groups.map((list, i) => {
+    const ents = i === 0 ? [...byId.values()] : [...new Set(list.map((x) => x.entryId))].map((id) => byId.get(id));
+    const head = { app: 'tilsynsdagbok', version: 3, kind: 'send', createdAt, part: i + 1, parts: groups.length };
+    const extra = i === 0 ? `"settings":${JSON.stringify(sharedSettings(settings))},"tombstones":${JSON.stringify(tombstones.map(({ sentAt, ...t }) => t))},"crew":${JSON.stringify(crew.map((c) => clean(c)))},` : '';
+    return `${JSON.stringify(head).slice(0, -1)},${extra}"entries":${JSON.stringify(ents)},"photos":[${list.map((x) => x.json).join(',')}]}`;
+  });
+
   const d = new Date(createdAt);
   const p2 = (n) => String(n).padStart(2, '0');
   const stamp = `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}_${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}`;
   return {
-    blob: new Blob(parts, { type: 'application/json' }),
-    filename: `tilsyn_${stamp}.json`,
+    texts,
+    size: texts.reduce((n, t) => n + t.length, 0),
+    filename: `tilsyn_${stamp}`,
     createdAt,
     entryIds: entries.map((e) => e.id),
     tombstoneIds: tombstones.map((t) => t.id),
@@ -155,46 +170,26 @@ export async function markSent(bundle) {
 
 /** Deler pakken via iPhones del-meny. Returnerer true hvis brukeren fullførte. */
 /**
- * Deler pakken via iPhones del-meny. Returnerer true hvis brukeren fullførte.
- * mode 'text' (standard): innholdet deles som tekst. «Arkiver i Filer» lager da en vanlig tekstfil
- *   («tekst.txt») med riktig dato, som OneDrive laster opp. Delte filer fikk dato 01.01.0001 og ble
- *   stående på «Venter…» i OneDrive. bundle.text må være klar på forhånd (del-menyen må åpnes direkte i trykket).
- * mode 'file': som før, som egen .json-fil.
+ * Deler én bit av sendingen som tekst via iPhones del-meny. Returnerer true hvis brukeren fullførte.
+ * Tekst (ikke fil): «Arkiver i Filer» lager da en vanlig tekstfil med riktig dato, som OneDrive laster opp.
+ * Delte filer fikk dato 01.01.0001 og ble stående på «Venter…» i OneDrive.
+ * Teksten er laget på forhånd, så del-menyen åpnes direkte i trykket (krav i Safari).
  */
-export const TEXT_SHARE_LIMIT = 1_000_000; // større tekst får iOS sin del-meny til å henge
-
-export async function shareBundle(bundle, mode = 'auto') {
-  if (mode === 'auto') mode = bundle.text && bundle.text.length <= TEXT_SHARE_LIMIT ? 'text' : 'file';
-  if (mode === 'text' && bundle.text && navigator.share) {
+export async function sharePart(bundle, i) {
+  const text = bundle.texts[i];
+  if (navigator.share) {
     try {
-      await navigator.share({ text: bundle.text });
+      await navigator.share({ text });
       return true;
     } catch (err) {
       if (err.name === 'AbortError') return false;
       throw err;
     }
   }
-  const variants = [
-    // Dato må settes eksplisitt: uten den lagrer iOS fila med dato «01.01.0001»,
-    // og OneDrive nekter å laste opp filer med dato før 1601 («Feil» / «Venter…»).
-    new File([bundle.blob], bundle.filename, { type: 'application/json', lastModified: bundle.createdAt }),
-    new File([bundle.blob], bundle.filename.replace(/\.json$/, '.txt'), { type: 'text/plain', lastModified: bundle.createdAt }),
-  ];
-  for (const file of variants) {
-    if (navigator.canShare?.({ files: [file] })) {
-      try {
-        await navigator.share({ files: [file] }); // bare filen – en tittel blir en ekstra tekstfil i «Arkiver i Filer»
-        return true;
-      } catch (err) {
-        if (err.name === 'AbortError') return false;
-        throw err;
-      }
-    }
-  }
-  // Ingen del-meny (f.eks. PC uten mappe): last ned filen i stedet
+  // Ingen del-meny (f.eks. PC uten mappe): last ned i stedet
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(bundle.blob);
-  a.download = bundle.filename;
+  a.href = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+  a.download = `${bundle.filename}${bundle.texts.length > 1 ? `_part${i + 1}` : ''}.json`;
   document.body.appendChild(a);
   a.click();
   a.remove();
@@ -348,7 +343,7 @@ async function importInbox(root, settings) {
     const d = new Date(data.createdAt || Date.now());
     const p2 = (n) => String(n).padStart(2, '0');
     const keep = /^tilsyn/i.test(name) ? name
-      : `tilsyn_${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}_${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}.json`;
+      : `tilsyn_${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}_${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}${data.parts > 1 ? `_part${data.part}of${data.parts}` : ''}.json`;
     await writeFile(processed, keep, file);
     await removeQuiet(inbox, name);
     files++;
