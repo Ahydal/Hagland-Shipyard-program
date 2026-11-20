@@ -511,7 +511,8 @@ export async function syncFolder(settings, h) {
   const areas = await writeAreas(root, settings, h);
   const snapshot = await writeSnapshot(root, settings);
   await db.put('meta', { key: 'lastSync', at: Date.now() });
-  return { imported: inbox.files, changed: inbox.changed, days, areas, folder: root.name, snapshot };
+  const missing = (await missingPhotoIds()).length;
+  return { imported: inbox.files, changed: inbox.changed, days, areas, folder: root.name, snapshot, missing };
 }
 
 /* ------------------------------------------------------------------ */
@@ -531,11 +532,19 @@ export async function addPcTombstone(entry) {
  * registreringer, bemanning, slettinger, skipsnavn og bilder som er lagt inn på PC.
  * Skrives bare når noe er endret.
  */
+/** Bilder registreringene viser til, men som PC-en ikke har fått (f.eks. fordi en sending aldri kom fram). */
+export async function missingPhotoIds() {
+  const have = new Set(await db.getAllKeys('photos'));
+  return (await db.getAll('entries')).flatMap((e) => (e.photoIds || []).filter((id) => !have.has(id)));
+}
+
 async function writeSnapshot(root, settings) {
   const entries = await db.getAll('entries');
   const crew = await allCrew();
   const tombstones = (await db.get('meta', 'pcTombstones'))?.list || [];
+  const missing = await missingPhotoIds();
   const sig = [
+    `missing:${missing.length}`,
     entries.map((e) => `${e.id}:${e.updatedAt || 0}`).sort().join(','),
     crew.map((c) => `${c.key}:${c.updatedAt || 0}`).sort().join(','),
     tombstones.length, JSON.stringify(sharedSettings(settings)),
@@ -546,6 +555,7 @@ async function writeSnapshot(root, settings) {
   const parts = [
     `{"app":"tilsynsdagbok","version":3,"kind":"pc-snapshot","createdAt":${createdAt},`,
     `"settings":${JSON.stringify(sharedSettings(settings))},`,
+    `"missingPhotos":${JSON.stringify(missing)},`,
     `"entries":${JSON.stringify(entries.map(({ sentAt, confirmedAt, photosSentAt, ...e }) => e))},`,
     `"crew":${JSON.stringify(crew.map(({ sentAt, confirmedAt, ...c }) => c))},`,
     `"tombstones":${JSON.stringify(tombstones)},"photos":[`,
@@ -573,12 +583,23 @@ export async function importFromPc(file, settings) {
   if (data?.app !== 'tilsynsdagbok') throw new Error('This file is not from Site Diary.');
   const changed = await applyBundle(data, settings, { markSent: true });
 
+  // Registreringer der PC-en mangler bilder: ikke bekreftet, og bildene sendes på nytt neste gang
+  const missing = new Set(data.missingPhotos || []);
+  const resend = [];
+  for (const e of await db.getAll('entries')) {
+    if (!(e.photoIds || []).some((id) => missing.has(id))) continue;
+    const { confirmedAt, photosSentAt, sentAt, ...rest } = e; // regnes som ikke sendt -> «Send»-stripa vises
+    resend.push(rest);
+  }
+  if (resend.length) await db.putMany('entries', resend);
+  const resendIds = new Set(resend.map((e) => e.id));
+
   // Bekreft alt PC-en har (samme eller nyere versjon) – det trenger ikke sendes igjen
   const pcEntries = new Map((data.entries || []).map((e) => [e.id, e.updatedAt || 0]));
   const confirmed = [];
   for (const e of await db.getAll('entries')) {
     const pc = pcEntries.get(e.id);
-    if (pc !== undefined && pc >= (e.updatedAt || 0) && isUnconfirmed(e)) {
+    if (pc !== undefined && pc >= (e.updatedAt || 0) && isUnconfirmed(e) && !resendIds.has(e.id)) {
       confirmed.push({ ...e, sentAt: Math.max(e.sentAt || 0, e.updatedAt || 0), confirmedAt: e.updatedAt || Date.now() });
     }
   }
@@ -597,7 +618,7 @@ export async function importFromPc(file, settings) {
   await db.put('meta', { key: 'tombstones', list: left });
 
   await db.put('meta', { key: 'lastFromPc', at: data.createdAt || Date.now(), importedAt: Date.now() });
-  return { changed, confirmed: confirmed.length + crewOk.length, createdAt: data.createdAt };
+  return { changed, confirmed: confirmed.length + crewOk.length, resendPhotos: missing.size, createdAt: data.createdAt };
 }
 
 /* ------------------------------------------------------------------ */
@@ -754,4 +775,16 @@ export async function migrateConfirmations() {
   const crew = (await allCrew()).filter(ok).map((c) => ({ ...c, confirmedAt: c.updatedAt || c.sentAt }));
   if (crew.length) await db.putMany('meta', crew);
   await db.put('meta', { key: 'confirmMigrated', at: Date.now() });
+}
+
+/**
+ * Engangs (v3.9.1): «bilder sendt» ble satt også for .json-sendinger som aldri kom fram til OneDrive.
+ * Nullstill det for alt som ikke er bekreftet, så neste sending tar med bildene.
+ */
+export async function resetPhotoResend() {
+  if (await db.get('meta', 'photoResendReset1')) return;
+  const list = (await db.getAll('entries')).filter((e) => e.photosSentAt && isUnconfirmed(e))
+    .map(({ photosSentAt, sentAt, ...e }) => e);
+  if (list.length) await db.putMany('entries', list);
+  await db.put('meta', { key: 'photoResendReset1', at: Date.now(), count: list.length });
 }
