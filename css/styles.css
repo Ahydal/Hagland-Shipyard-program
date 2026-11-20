@@ -417,3 +417,13 @@ dialog::backdrop { background: rgba(2, 6, 23, .55); }
 /* ---------- Bilder som ikke har kommet fram ---------- */
 img.missing { background: repeating-linear-gradient(45deg, var(--surface-2), var(--surface-2) 6px, var(--line) 6px, var(--line) 12px); border: 1px dashed var(--muted); }
 .warn { margin: 0; padding: 8px 10px; border-radius: 8px; background: #fef3c7; color: #92400e; font-size: .9rem; }
+
+/* ---------- Ny versjon ---------- */
+.update-banner {
+  position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(96px + var(--safe-b)); z-index: 2000;
+  display: flex; align-items: center; gap: 12px; padding: 10px 12px 10px 16px; border-radius: 14px;
+  background: #0f172a; color: #fff; box-shadow: 0 10px 30px rgba(0,0,0,.3); max-width: calc(100vw - 24px);
+}
+.update-banner span { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; font-size: .92rem; }
+.update-banner .ico { width: 18px; height: 18px; }
+@media (min-width: 900px) { .update-banner { bottom: 24px; } }
