@@ -2,7 +2,7 @@ import * as db from './db.js';
 import * as summary from './summary.js';
 import * as sync from './sync.js';
 
-const APP_VERSION = '3.10.0';
+const APP_VERSION = '3.11.0';
 
 /* ------------------------------------------------------------------ */
 /* Konstanter                                                          */
@@ -333,7 +333,7 @@ async function render() {
   main.classList.toggle('wide', ['week', 'dayreport', 'photos'].includes(state.view));
   main.innerHTML = html;
   hydrateThumbs(main);
-  if (state.view === 'week') renderWeekFeed();
+  if (state.view === 'week') { renderWeekFeed(); renderTodos(); }
 }
 
 function entryCard(e, { showShip = false } = {}) {
@@ -552,6 +552,7 @@ const VIEWS = {
         </aside>
 
         <div class="week-main desktop-only">
+          <div class="card todo-card" id="todoCard"></div>
           <div class="card">
             <div class="feed-head">
               <h2>This week's entries</h2>
@@ -782,6 +783,55 @@ const VIEWS = {
     </section>`;
   },
 };
+
+/* ------------------------------------------------------------------ */
+/* To do (PC): enkel liste med valgfri dato                            */
+/* ------------------------------------------------------------------ */
+
+const getTodos = async () => (await db.get('meta', 'todos'))?.list || [];
+const saveTodos = (list) => db.put('meta', { key: 'todos', list, updatedAt: Date.now() });
+
+async function renderTodos() {
+  const box = $('#todoCard');
+  if (!box) return;
+  const list = await getTodos();
+  const t = today();
+  const open = list.filter((x) => !x.done)
+    .sort((a, b) => (a.date || '9999').localeCompare(b.date || '9999') || a.createdAt - b.createdAt);
+  const done = list.filter((x) => x.done).sort((a, b) => (b.doneAt || 0) - (a.doneAt || 0));
+  const short = (d) => parseISODate(d).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+  const item = (x) => `
+    <li class="todo ${x.done ? 'done' : ''}">
+      <input type="checkbox" ${x.done ? 'checked' : ''} data-change="todo-done" data-id="${x.id}" aria-label="Done">
+      <span class="todo-text" data-action="todo-edit" data-id="${x.id}" title="Click to edit">${esc(x.text)}</span>
+      ${x.date ? `<span class="todo-date ${!x.done && x.date < t ? 'overdue' : ''} ${x.date === t ? 'today' : ''}">${x.date === t ? 'Today' : short(x.date)}</span>` : ''}
+      <button class="icon-btn todo-del" data-action="todo-del" data-id="${x.id}" aria-label="Delete">${icon('x')}</button>
+    </li>`;
+  box.innerHTML = `
+    <div class="feed-head"><h2>${icon('check')} To do</h2><span class="muted small">${open.length} open</span></div>
+    <form class="todo-add" data-todo-form onsubmit="return false">
+      <input name="todoText" placeholder="Add a to-do, e.g. Inspection DB 2 SB with Class" autocomplete="off">
+      <input name="todoDate" type="date" aria-label="Date (optional)">
+      <button class="btn small primary" data-action="todo-add">${icon('plus')} Add</button>
+    </form>
+    ${open.length ? `<ul class="todo-list">${open.map(item).join('')}</ul>` : '<p class="muted small">Nothing planned. Add inspections, reminders or things to follow up.</p>'}
+    ${done.length ? `<details class="todo-done-list" ${state.todoShowDone ? 'open' : ''} data-todo-done-details>
+      <summary class="muted small">Done (${done.length})</summary>
+      <ul class="todo-list">${done.map(item).join('')}</ul>
+      <button class="btn small ghost" data-action="todo-clear">${icon('trash')} Clear done</button>
+    </details>` : ''}`;
+}
+
+async function addTodo() {
+  const f = $('[data-todo-form]');
+  const text = f.elements.todoText.value.trim();
+  if (!text) { f.elements.todoText.focus(); return; }
+  const list = await getTodos();
+  list.push({ id: uid(), text, date: f.elements.todoDate.value || '', done: false, createdAt: Date.now() });
+  await saveTodos(list);
+  await renderTodos();
+  $('[data-todo-form]')?.elements.todoText.focus();
+}
 
 /* ------------------------------------------------------------------ */
 /* Bemanning (personell per underleverandør, per skip og dag)          */
@@ -1661,6 +1711,29 @@ const ACTIONS = {
     runSync();
   },
   'sync-now': () => runSync(),
+  'todo-add': () => addTodo(),
+  'todo-del': async (el) => {
+    await saveTodos((await getTodos()).filter((x) => x.id !== el.dataset.id));
+    renderTodos();
+  },
+  'todo-edit': async (el) => {
+    const list = await getTodos();
+    const x = list.find((y) => y.id === el.dataset.id);
+    if (!x) return;
+    const text = prompt('Edit to-do:', x.text);
+    if (text === null) return;
+    if (!text.trim()) { await saveTodos(list.filter((y) => y.id !== x.id)); renderTodos(); return; }
+    const date = prompt('Date (YYYY-MM-DD), leave empty for none:', x.date || '');
+    x.text = text.trim();
+    if (date !== null) x.date = /^\d{4}-\d{2}-\d{2}$/.test(date.trim()) ? date.trim() : '';
+    await saveTodos(list);
+    renderTodos();
+  },
+  'todo-clear': async () => {
+    if (!confirm('Remove all done to-dos?')) return;
+    await saveTodos((await getTodos()).filter((x) => !x.done));
+    renderTodos();
+  },
   'apply-update': () => {
     if (editorEl().open && state.draft?.dirty && !confirm('You have an unsaved entry. It is kept as a draft and restored after the update. Update now?')) return;
     location.reload();
@@ -1774,6 +1847,13 @@ const CHANGES = {
   'pick-date': (el) => { if (el.value) { state.date = el.value > today() ? today() : el.value; render(); } },
   'ship-select': async (el) => { state.settings.activeShip = el.value; await saveSettings(); render(); },
   'toggle-insp': (el) => { $('.insp-fields', editorEl()).hidden = !el.checked; },
+  'todo-done': async (el) => {
+    const list = await getTodos();
+    const x = list.find((y) => y.id === el.dataset.id);
+    if (x) { x.done = el.checked; x.doneAt = el.checked ? Date.now() : null; }
+    await saveTodos(list);
+    setTimeout(renderTodos, 250); // la avkrysningen synes et øyeblikk
+  },
   'add-photos': async (el) => { const files = [...el.files]; el.value = ''; await addFilesToDraft(files); },
   stamp: async (el) => { state.settings.stampPhotos = el.checked; await saveSettings(); toast('Saved'); },
   import: async (el) => { const f = el.files[0]; el.value = ''; if (f) await importBackup(f); },
@@ -1804,6 +1884,7 @@ function bindEvents() {
   });
 
   document.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter' && ev.target.closest('[data-todo-form]')) { ev.preventDefault(); addTodo(); return; }
     if (ev.key === 'Enter' && ev.target.matches('article.entry')) ACTIONS.edit(ev.target);
     if ($('#lightbox').open) {
       if (ev.key === 'ArrowLeft') ACTIONS['lb-step']({ dataset: { step: -1 } });
@@ -1838,6 +1919,10 @@ function bindEvents() {
       saveSettings().then(() => toast('Saved'));
     }
   });
+
+  document.addEventListener('toggle', (ev) => {
+    if (ev.target.matches?.('[data-todo-done-details]')) state.todoShowDone = ev.target.open;
+  }, true);
 
   document.addEventListener('input', (ev) => {
     const el = ev.target;
