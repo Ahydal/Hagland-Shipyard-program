@@ -319,13 +319,6 @@ async function importInbox(root, settings) {
 
 /* ---------- Sortert utskrift per skip og dag ---------- */
 
-function photoBaseName(e, fmtLocShort) {
-  const time = (e.time || '').replace(':', '');
-  const loc = fmtLocShort(e.location);
-  const text = (e.text || '').split('\n')[0].trim().slice(0, 50);
-  return safeName([time, e.company, loc].filter(Boolean).join(' ') + (text ? ` - ${text}` : ''), 100);
-}
-
 async function resizeForDoc(blob, max = 1280) {
   const bmp = await createImageBitmap(blob);
   const scale = Math.min(1, max / Math.max(bmp.width, bmp.height));
@@ -397,9 +390,9 @@ async function buildDocx(ship, date, entries, photosById, crew, fmtLoc, fmtLong)
   return Packer.toBlob(doc);
 }
 
-const daySig = (shipName, entries, crew) => 'v3|' + shipName + '|' + entries.map((e) => `${e.id}:${e.updatedAt || 0}`).sort().join(',') + `|crew:${crew?.updatedAt || 0}`;
+const daySig = (shipName, entries, crew) => 'v4|' + shipName + '|' + entries.map((e) => `${e.id}:${e.updatedAt || 0}`).sort().join(',') + `|crew:${crew?.updatedAt || 0}`;
 
-/** Skriver mappa for én dag: bilder + Word-dagbok. Fjerner filer som ikke lenger hører til. */
+/** Skriver mappa for én dag: Word-dagboken (bildene ligger én gang, i «By area»). Fjerner filer som ikke lenger hører til. */
 async function writeDay(root, ship, date, entries, crew, prev, h) {
   const shipFolder = safeName(ship.name);
   const files = {}; // filnavn -> photoId | 'docx'
@@ -409,17 +402,9 @@ async function writeDay(root, ship, date, entries, crew, prev, h) {
     const shipDir = await root.getDirectoryHandle(shipFolder, { create: true });
     const dayDir = await shipDir.getDirectoryHandle(date, { create: true });
     for (const e of entries) {
-      const base = photoBaseName(e, h.fmtLocShort);
-      for (let i = 0; i < (e.photoIds || []).length; i++) {
-        const id = e.photoIds[i];
+      for (const id of e.photoIds || []) {
         const p = await db.get('photos', id);
-        if (!p) continue;
-        photos.set(id, p);
-        let name = `${base}${e.photoIds.length > 1 ? ` (${i + 1})` : ''}.jpg`;
-        for (let n = 2; files[name]; n++) name = `${base} (${i + 1}-${n}).jpg`;
-        files[name] = id;
-        const same = prev?.folder === shipFolder && prev?.files?.[name] === id;
-        if (!same) await writeFile(dayDir, name, p.blob);
+        if (p) photos.set(id, p); // til bildene inne i Word-dagboken
       }
     }
     const docName = safeName(`Daily log ${ship.name} ${date}`) + '.docx';
@@ -588,8 +573,9 @@ const NO_AREA = 'No location';
 /** Grupperinger: mappenavn i OneDrive, nøkkelprefiks for hva som er skrevet, og om «ikke satt» får egen mappe. */
 export const DIMS = {
   area: { folder: 'By area', prefix: 'area:', none: NO_AREA, writeNone: true },
-  section: { folder: 'By section', prefix: 'grp:section:', none: 'No section', writeNone: false },
-  equipment: { folder: 'By equipment', prefix: 'grp:equipment:', none: 'No equipment', writeNone: false },
+  // Seksjon og utstyr grupperes bare i appen; mappene i OneDrive ryddes bort (hvert bilde lagres én gang)
+  section: { folder: 'By section', prefix: 'grp:section:', none: 'No section', writeNone: false, onlyInApp: true },
+  equipment: { folder: 'By equipment', prefix: 'grp:equipment:', none: 'No equipment', writeNone: false, onlyInApp: true },
 };
 
 /** «DB1 PS», «db 1 ps» og «DB 1 PS» blir samme navn: «DB 1 PS». */
@@ -651,7 +637,7 @@ async function writeAreas(root, settings, h) {
 
 /** Kopi av hvert bilde i <skip>/<By …>/<gruppe>/. Flytter/sletter når gruppe, skip eller tekst endres. */
 async function writeGroup(root, settings, h, dim) {
-  const { folder: BY, prefix, writeNone } = DIMS[dim];
+  const { folder: BY, prefix, writeNone, onlyInApp } = DIMS[dim];
   const entries = await db.getAll('entries');
   const names = groupNames(dim, entries);
   const meta = await db.getAll('meta');
@@ -661,6 +647,7 @@ async function writeGroup(root, settings, h, dim) {
   for (const e of entries) {
     const ship = settings.ships.find((x) => x.id === e.shipId);
     if (!ship) continue;
+    if (onlyInApp) break; // ingenting ønskes -> alt som er skrevet før fjernes under
     const g = groupOf(dim, e.location);
     if (g.none && !writeNone) continue;
     const area = names.get(g.key);

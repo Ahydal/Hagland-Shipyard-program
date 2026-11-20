@@ -2,7 +2,7 @@ import * as db from './db.js';
 import * as summary from './summary.js';
 import * as sync from './sync.js';
 
-const APP_VERSION = '3.5.0';
+const APP_VERSION = '3.6.0';
 
 /* ------------------------------------------------------------------ */
 /* Konstanter                                                          */
@@ -627,7 +627,7 @@ const VIEWS = {
           <button class="area-item ${!sel ? 'on' : ''}" data-action="gallery-area" data-key="all">${icon('image')}<span>All photos</span><b>${total}</b></button>
           ${list.map((g) => `<button class="area-item ${sel?.key === g.key ? 'on' : ''}" data-action="gallery-area" data-key="${esc(g.key)}">${icon('folder')}<span>${esc(g.name)}</span><b>${g.items.length}</b></button>`).join('')}
           <p class="muted small">${({ area: 'Grouped by “Room / tank”, then Deck, then Section.', section: 'Grouped by “Section”.', equipment: 'Grouped by “Equipment / system”.' })[dim]}
-            The same folders are in OneDrive under <b>${esc(sh.name)} → ${sync.DIMS[dim].folder}</b>${dim === 'area' ? '' : ' (photos without a value are only in the app)'}.</p>
+            ${dim === 'area' ? `The same folders are in OneDrive under <b>${esc(sh.name)} → By area</b>. Each photo is stored there once; the day folders only hold the Daily log.` : 'This grouping is only in the app. In OneDrive the photos are stored once, under <b>By area</b>.'}</p>
         </nav>
         <div class="card">
           <div class="feed-head"><h2>${esc(sel ? sel.name : 'All photos')} <span class="muted small">(${items.length})</span></h2>
