@@ -94,12 +94,18 @@ export async function buildBundle(settings) {
   const parts = [
     `{"app":"tilsynsdagbok","version":3,"kind":"send","createdAt":${createdAt},`,
     `"settings":${JSON.stringify(sharedSettings(settings))},`,
-    `"entries":${JSON.stringify(entries.map(({ sentAt, confirmedAt, ...e }) => e))},`,
+    `"entries":${JSON.stringify(entries.map(({ sentAt, confirmedAt, photosSentAt, ...e }) => e))},`,
     `"tombstones":${JSON.stringify(tombstones.map(({ sentAt, ...t }) => t))},`,
     `"crew":${JSON.stringify(crew.map(({ sentAt, confirmedAt, ...c }) => c))},"photos":[`,
   ];
   let first = true;
+  const photoEntryIds = [];
+  // Bilder: alltid for nye/endrede registreringer. For det som er sendt før men ikke bekreftet,
+  // høyst én gang per døgn – ellers blir sendingene store og del-menyen/opplastingen treg.
+  const RESEND_PHOTOS_AFTER = 24 * 3600e3;
   for (const e of entries) {
+    if (!isUnsent(e) && e.photosSentAt && createdAt - e.photosSentAt < RESEND_PHOTOS_AFTER) continue;
+    if (e.photoIds?.length) photoEntryIds.push(e.id);
     for (const id of e.photoIds || []) {
       const p = await db.get('photos', id);
       if (!p) continue;
@@ -119,6 +125,7 @@ export async function buildBundle(settings) {
     entryIds: entries.map((e) => e.id),
     tombstoneIds: tombstones.map((t) => t.id),
     crewKeys: crew.map((c) => c.key),
+    photoEntryIds,
     count: entries.length + tombstones.length + crew.length,
     fresh,
   };
@@ -129,7 +136,9 @@ export async function markSent(bundle) {
   const updated = [];
   for (const id of bundle.entryIds) {
     const e = await db.get('entries', id);
-    if (e && (e.updatedAt || 0) <= bundle.createdAt) updated.push({ ...e, sentAt: bundle.createdAt });
+    if (e && (e.updatedAt || 0) <= bundle.createdAt) {
+      updated.push({ ...e, sentAt: bundle.createdAt, ...(bundle.photoEntryIds?.includes(id) ? { photosSentAt: bundle.createdAt } : {}) });
+    }
   }
   if (updated.length) await db.putMany('entries', updated);
   const crew = [];
@@ -152,7 +161,10 @@ export async function markSent(bundle) {
  *   stående på «Venter…» i OneDrive. bundle.text må være klar på forhånd (del-menyen må åpnes direkte i trykket).
  * mode 'file': som før, som egen .json-fil.
  */
-export async function shareBundle(bundle, mode = 'text') {
+export const TEXT_SHARE_LIMIT = 1_000_000; // større tekst får iOS sin del-meny til å henge
+
+export async function shareBundle(bundle, mode = 'auto') {
+  if (mode === 'auto') mode = bundle.text && bundle.text.length <= TEXT_SHARE_LIMIT ? 'text' : 'file';
   if (mode === 'text' && bundle.text && navigator.share) {
     try {
       await navigator.share({ text: bundle.text });
@@ -205,7 +217,7 @@ export async function applyBundle(data, settings, { markSent = false } = {}) {
     if (cur && (cur.updatedAt || 0) === (e.updatedAt || 0)) { same.add(e.id); continue; }
     const { sentAt, ...clean } = e;
     // Fra PC til iPhone: merk som sendt, så det ikke sendes tilbake igjen
-    const { confirmedAt, ...clean2 } = clean;
+    const { confirmedAt, photosSentAt, ...clean2 } = clean;
     await db.put('entries', markSent ? { ...clean2, sentAt: clean2.updatedAt || Date.now(), confirmedAt: clean2.updatedAt || Date.now() } : clean2);
     accepted.add(e.id);
     changed++;
@@ -539,7 +551,7 @@ async function writeSnapshot(root, settings) {
   const parts = [
     `{"app":"tilsynsdagbok","version":3,"kind":"pc-snapshot","createdAt":${createdAt},`,
     `"settings":${JSON.stringify(sharedSettings(settings))},`,
-    `"entries":${JSON.stringify(entries.map(({ sentAt, confirmedAt, ...e }) => e))},`,
+    `"entries":${JSON.stringify(entries.map(({ sentAt, confirmedAt, photosSentAt, ...e }) => e))},`,
     `"crew":${JSON.stringify(crew.map(({ sentAt, confirmedAt, ...c }) => c))},`,
     `"tombstones":${JSON.stringify(tombstones)},"photos":[`,
   ];
