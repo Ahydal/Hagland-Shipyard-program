@@ -2,7 +2,7 @@ import * as db from './db.js';
 import * as summary from './summary.js';
 import * as sync from './sync.js';
 
-const APP_VERSION = '3.9.0';
+const APP_VERSION = '3.8.1';
 
 /* ------------------------------------------------------------------ */
 /* Konstanter                                                          */
@@ -1052,46 +1052,38 @@ async function iphoneOneDriveCard() {
 
 let preparedBundle = null;
 
-/** iPhone steg 1: pakk (kan ta litt tid). Steg 2 (ett trykk per bit): åpne del-menyen. */
+/** iPhone steg 1: pakk (kan ta litt tid). Steg 2 (eget trykk): åpne del-menyen. */
 async function prepareSend() {
   toast('Packing …');
   preparedBundle = await sync.buildBundle(state.settings);
   if (!preparedBundle.count) { toast('Everything has already been sent'); return; }
-  preparedBundle.done = [];
-  const n = preparedBundle.texts.length;
-  const size = preparedBundle.size / 1048576;
+  // Små sendinger deles som tekst (gir riktig fildato i OneDrive); store som fil, ellers henger del-menyen
+  if (preparedBundle.blob.size <= sync.TEXT_SHARE_LIMIT) preparedBundle.text = await preparedBundle.blob.text(); // klar før trykket (krav i Safari)
+  const size = preparedBundle.blob.size / 1048576;
   const mb = size < 0.1 ? '< 0.1' : size.toLocaleString('en-GB', { maximumFractionDigits: 1 });
   const dlg = $('#sheet');
   dlg.innerHTML = `
     <div class="sheet">
       <h2>${icon('cloud')} Send to OneDrive</h2>
-      <p><b>${preparedBundle.fresh}</b> new ${preparedBundle.fresh === 1 ? 'change' : 'changes'}${preparedBundle.count > preparedBundle.fresh ? ` + ${preparedBundle.count - preparedBundle.fresh} earlier, not yet confirmed by the PC` : ''} (${mb} MB${n > 1 ? `, in ${n} parts` : ''}).</p>
+      <p><b>${preparedBundle.fresh}</b> new ${preparedBundle.fresh === 1 ? 'change' : 'changes'}${preparedBundle.count > preparedBundle.fresh ? ` + ${preparedBundle.count - preparedBundle.fresh} earlier, not yet confirmed by the PC` : ''} (${mb} MB).</p>
       <ol class="howto">
-        <li>Tap “${n > 1 ? 'Part 1' : 'Open share menu'}”.</li>
+        <li>Tap “Open share menu”.</li>
         <li>Choose <b>“Save to Files”</b>.</li>
-        <li>Choose <b>OneDrive</b> (the same one the PC uses, e.g. “OneDrive – Hagland”) → your app folder → <b>Inbox</b> and tap “Save”.${n > 1 ? ' Then the next part – the iPhone remembers the folder.' : ''}</li>
+        <li>Choose <b>OneDrive</b> (the same one the PC uses, e.g. “OneDrive – Hagland”) → your app folder → <b>Inbox</b> and tap “Save”.</li>
       </ol>
-      <div class="part-btns">${preparedBundle.texts.map((_, i) => `
-        <button class="btn big ${i === 0 ? 'primary' : ''}" data-action="share-part" data-i="${i}" ${i > 0 ? 'disabled' : ''}>${icon('cloud')} ${n > 1 ? `Part ${i + 1} of ${n}` : 'Open share menu'}</button>`).join('')}</div>
-      <p class="muted small">The file is saved as “tekst” (or “Text”) – that is fine, the PC app recognises it. Tip: open the OneDrive app for a moment afterwards${size > 5 ? ', and use Wi-Fi if you can' : ''}.</p>
+      <p class="muted small">${preparedBundle.text ? 'The file is saved as “tekst” (or “Text”) – that is fine, the PC app recognises it. ' : ''}Tip: open the OneDrive app for a moment afterwards${size > 5 ? ', and use Wi-Fi if you can – this send is large' : ''}.</p>
+      <button class="btn primary big" data-action="share-bundle" data-mode="auto">${icon('cloud')} Open share menu</button>
+      ${preparedBundle.text ? '<button class="btn small ghost" data-action="share-bundle" data-mode="file">Share as .json file instead</button>' : ''}
       <button class="btn ghost" data-action="close-sheet">Cancel</button>
     </div>`;
   if (!dlg.open) dlg.showModal();
 }
 
-async function sharePart(i) {
-  const b = preparedBundle;
-  if (!b) return;
+async function shareBundle(mode = 'auto') {
+  if (!preparedBundle) return;
   try {
-    if (!(await sync.sharePart(b, i))) return; // avbrutt – prøv igjen
-    b.done.push(i);
-    const btns = $$('[data-action=share-part]');
-    btns[i].disabled = true;
-    btns[i].className = 'btn big';
-    btns[i].innerHTML = `${icon('check')} ${b.texts.length > 1 ? `Part ${i + 1} sent` : 'Sent'}`;
-    if (btns[i + 1]) { btns[i + 1].disabled = false; btns[i + 1].className = 'btn big primary'; return; }
-    // Alle biter delt
-    await sync.markSent(b);
+    if (!(await sync.shareBundle(preparedBundle, mode))) return; // avbrutt – prøv igjen
+    await sync.markSent(preparedBundle);
     preparedBundle = null;
     $('#sheet').close();
     toast('Sent to OneDrive');
@@ -1632,7 +1624,7 @@ const ACTIONS = {
     updateCrewTotal();
   },
   'crew-save': () => saveCrew(),
-  'share-part': (el) => sharePart(Number(el.dataset.i)),
+  'share-bundle': (el) => shareBundle(el.dataset.mode),
   'close-sheet': () => { preparedBundle = null; $('#sheet').close(); },
   'resend-all': async () => {
     if (!confirm('Mark all entries as not sent? The next send will then include everything (the PC skips what it already has).')) return;
