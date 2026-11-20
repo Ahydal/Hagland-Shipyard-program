@@ -2,7 +2,7 @@ import * as db from './db.js';
 import * as summary from './summary.js';
 import * as sync from './sync.js';
 
-const APP_VERSION = '3.7.1';
+const APP_VERSION = '3.8.0';
 
 /* ------------------------------------------------------------------ */
 /* Konstanter                                                          */
@@ -1057,6 +1057,7 @@ async function prepareSend() {
   toast('Packing …');
   preparedBundle = await sync.buildBundle(state.settings);
   if (!preparedBundle.count) { toast('Everything has already been sent'); return; }
+  preparedBundle.text = await preparedBundle.blob.text(); // klar før trykket (krav i Safari)
   const size = preparedBundle.blob.size / 1048576;
   const mb = size < 0.1 ? '< 0.1' : size.toLocaleString('en-GB', { maximumFractionDigits: 1 });
   const dlg = $('#sheet');
@@ -1069,17 +1070,18 @@ async function prepareSend() {
         <li>Choose <b>“Save to Files”</b>.</li>
         <li>Choose <b>OneDrive</b> (the same one the PC uses, e.g. “OneDrive – Hagland”) → your app folder → <b>Inbox</b> and tap “Save”.</li>
       </ol>
-      <p class="muted small">Tip: open the OneDrive app for a moment afterwards. iOS sometimes waits to upload until OneDrive is opened.</p>
-      <button class="btn primary big" data-action="share-bundle">${icon('cloud')} Open share menu</button>
+      <p class="muted small">The file is saved as “tekst” (or “Text”) – that is fine, the PC app recognises it. Tip: open the OneDrive app for a moment afterwards.</p>
+      <button class="btn primary big" data-action="share-bundle" data-mode="text">${icon('cloud')} Open share menu</button>
+      <button class="btn small ghost" data-action="share-bundle" data-mode="file">Share as .json file instead</button>
       <button class="btn ghost" data-action="close-sheet">Cancel</button>
     </div>`;
   if (!dlg.open) dlg.showModal();
 }
 
-async function shareBundle() {
+async function shareBundle(mode = 'text') {
   if (!preparedBundle) return;
   try {
-    if (!(await sync.shareBundle(preparedBundle))) return; // avbrutt – prøv igjen
+    if (!(await sync.shareBundle(preparedBundle, mode))) return; // avbrutt – prøv igjen
     await sync.markSent(preparedBundle);
     preparedBundle = null;
     $('#sheet').close();
@@ -1621,7 +1623,7 @@ const ACTIONS = {
     updateCrewTotal();
   },
   'crew-save': () => saveCrew(),
-  'share-bundle': () => shareBundle(),
+  'share-bundle': (el) => shareBundle(el.dataset.mode),
   'close-sheet': () => { preparedBundle = null; $('#sheet').close(); },
   'resend-all': async () => {
     if (!confirm('Mark all entries as not sent? The next send will then include everything (the PC skips what it already has).')) return;

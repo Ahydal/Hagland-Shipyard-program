@@ -145,7 +145,23 @@ export async function markSent(bundle) {
 }
 
 /** Deler pakken via iPhones del-meny. Returnerer true hvis brukeren fullførte. */
-export async function shareBundle(bundle) {
+/**
+ * Deler pakken via iPhones del-meny. Returnerer true hvis brukeren fullførte.
+ * mode 'text' (standard): innholdet deles som tekst. «Arkiver i Filer» lager da en vanlig tekstfil
+ *   («tekst.txt») med riktig dato, som OneDrive laster opp. Delte filer fikk dato 01.01.0001 og ble
+ *   stående på «Venter…» i OneDrive. bundle.text må være klar på forhånd (del-menyen må åpnes direkte i trykket).
+ * mode 'file': som før, som egen .json-fil.
+ */
+export async function shareBundle(bundle, mode = 'text') {
+  if (mode === 'text' && bundle.text && navigator.share) {
+    try {
+      await navigator.share({ text: bundle.text });
+      return true;
+    } catch (err) {
+      if (err.name === 'AbortError') return false;
+      throw err;
+    }
+  }
   const variants = [
     // Dato må settes eksplisitt: uten den lagrer iOS fila med dato «01.01.0001»,
     // og OneDrive nekter å laste opp filer med dato før 1601 («Feil» / «Venter…»).
@@ -305,13 +321,23 @@ async function importInbox(root, settings) {
   for (const inbox of await inboxDirs(root)) {
   let processed = null;
   for await (const [name, h] of inbox.entries()) {
-    if (h.kind !== 'file' || !/^tilsyn.*\.(json|txt)$/i.test(name)) continue;
+    if (h.kind !== 'file' || !/\.(json|txt)$/i.test(name)) continue;
+    const file = await h.getFile();
     let data;
-    try { data = JSON.parse(await (await h.getFile()).text()); } catch { continue; }
+    try {
+      const text = await file.text();
+      if (!text.trimStart().startsWith('{"app":"tilsynsdagbok"')) continue; // ikke en pakke
+      data = JSON.parse(text);
+    } catch { continue; }
     if (data?.app !== 'tilsynsdagbok') continue;
     changed += await applyBundle(data, settings);
     processed ??= await inbox.getDirectoryHandle(PROCESSED, { create: true });
-    await writeFile(processed, name, await h.getFile());
+    // Fast, unikt navn i Processed (tekstfiler fra iPhone heter bare «tekst», «tekst 2» …)
+    const d = new Date(data.createdAt || Date.now());
+    const p2 = (n) => String(n).padStart(2, '0');
+    const keep = /^tilsyn/i.test(name) ? name
+      : `tilsyn_${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}_${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}.json`;
+    await writeFile(processed, keep, file);
     await removeQuiet(inbox, name);
     files++;
   }
