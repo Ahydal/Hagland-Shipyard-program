@@ -147,8 +147,10 @@ export async function markSent(bundle) {
 /** Deler pakken via iPhones del-meny. Returnerer true hvis brukeren fullførte. */
 export async function shareBundle(bundle) {
   const variants = [
-    new File([bundle.blob], bundle.filename, { type: 'application/json' }),
-    new File([bundle.blob], bundle.filename.replace(/\.json$/, '.txt'), { type: 'text/plain' }),
+    // Dato må settes eksplisitt: uten den lagrer iOS fila med dato «01.01.0001»,
+    // og OneDrive nekter å laste opp filer med dato før 1601 («Feil» / «Venter…»).
+    new File([bundle.blob], bundle.filename, { type: 'application/json', lastModified: bundle.createdAt }),
+    new File([bundle.blob], bundle.filename.replace(/\.json$/, '.txt'), { type: 'text/plain', lastModified: bundle.createdAt }),
   ];
   for (const file of variants) {
     if (navigator.canShare?.({ files: [file] })) {
