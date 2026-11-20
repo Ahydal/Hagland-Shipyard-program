@@ -408,3 +408,7 @@ dialog::backdrop { background: rgba(2, 6, 23, .55); }
 .list-block { border-top: 1px solid var(--line); padding-top: 10px; }
 .list-block summary { cursor: pointer; padding: 4px 0; }
 .list-block .field { margin-top: 10px; }
+
+/* ---------- Forhåndsvisning av dagsrapport ---------- */
+.report-preview { padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); font-size: .92rem; line-height: 1.5; max-height: 320px; overflow-y: auto; }
+.report-preview[hidden] { display: none; }

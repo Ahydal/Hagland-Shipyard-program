@@ -2,7 +2,7 @@ import * as db from './db.js';
 import * as summary from './summary.js';
 import * as sync from './sync.js';
 
-const APP_VERSION = '3.6.0';
+const APP_VERSION = '3.7.0';
 
 /* ------------------------------------------------------------------ */
 /* Konstanter                                                          */
@@ -388,6 +388,36 @@ const listFor = (kind, shipId) => state.settings.lists?.[kind]?.[shipId] || [];
 const areaList = (shipId) => listFor('room', shipId);
 const DIM_FIELD = { area: 'room', section: 'section', equipment: 'equipment' };
 
+/** Overskriftslinje for et firma i dagsrapporten, f.eks. «Paint Co – 9 people on board», «Paint Co» eller «General». */
+function isCompanyLine(line) {
+  const t = line.trim();
+  if (!t) return false;
+  if (/^.{1,80}?\s[–-]\s\d+\s+(people|persons?)\s+on\s+board\.?$/i.test(t)) return true;
+  if (/^general:?$/i.test(t)) return true;
+  const norm = (x) => x.trim().toLowerCase();
+  return (state.reportCompanies || []).some((c) => norm(c) === norm(t));
+}
+
+/** Dagsrapporten som HTML med fete firmanavn (til utklippstavle og forhåndsvisning). */
+function reportHtml(text) {
+  return String(text || '').replace(/\r/g, '').split('\n')
+    .map((l) => (isCompanyLine(l) ? `<b>${esc(l.trim())}</b>` : esc(l)))
+    .join('<br>');
+}
+
+async function copyRich(text) {
+  const html = `<div style="font-family:Calibri,Arial,sans-serif;font-size:11pt">${reportHtml(text)}</div>`;
+  try {
+    await navigator.clipboard.write([new ClipboardItem({
+      'text/html': new Blob([html], { type: 'text/html' }),
+      'text/plain': new Blob([text], { type: 'text/plain' }),
+    })]);
+    return true;
+  } catch {
+    return copyText(text); // nettleseren støtter ikke formatert kopi – ren tekst
+  }
+}
+
 const VIEWS = {
   async day() {
     if (!sync.canUseFolder()) state.pending = await sync.pendingCount();
@@ -554,6 +584,8 @@ const VIEWS = {
     const saved = (await db.get('meta', `dsummary:${rsh.id}:${date}`))?.text || '';
     const hasKey = !!summary.getApiKey();
     const nEntries = ships.reduce((n, x) => n + x.entries.length, 0);
+    // Firmanavn som skal være fete i rapporten (fra bemanning og registreringer)
+    state.reportCompanies = [...new Set(ships.flatMap((x) => [...crewRows(x.crew).map((r) => r.company), ...x.entries.map((e) => e.company)]).filter(Boolean))];
     return `
     <section class="view">
       <div class="daybar">
@@ -578,8 +610,10 @@ const VIEWS = {
               <button class="btn" data-action="copy-for-claude" data-kind="day">${icon('copy')} Copy for Claude app</button>
             </div>
             ${hasKey ? '' : `<p class="muted small">“Write with AI” needs an API key (<a href="#" data-action="nav" data-view="settings">Settings</a>). Without a key: tap “Copy for Claude app”, paste it into Claude, and paste the answer here.</p>`}
-            <textarea id="summaryText" rows="12" data-input="summary" data-key="dsummary:${rsh.id}:${date}" placeholder="The daily report appears here. You can edit it before copying.">${esc(saved)}</textarea>
-            <button class="btn big primary-outline" data-action="copy-summary">${icon('copy')} Copy daily report</button>
+            <textarea id="summaryText" rows="12" data-input="summary" data-key="dsummary:${rsh.id}:${date}" data-rich="1" placeholder="The daily report appears here. You can edit it before copying.">${esc(saved)}</textarea>
+            <div class="report-preview" id="reportPreview" ${saved.trim() ? '' : 'hidden'}>${reportHtml(saved)}</div>
+            <button class="btn big primary-outline" data-action="copy-summary" data-rich="1">${icon('copy')} Copy daily report</button>
+            <p class="muted small">Company names are copied in <b>bold</b> when you paste into Marine Manager or e-mail.</p>
           </div>
           ${ships.map((x) => crewTable(x.sh, x.crew)).join('')}
         </aside>
@@ -1621,10 +1655,11 @@ const ACTIONS = {
       toast('Could not copy');
     }
   },
-  'copy-summary': async () => {
+  'copy-summary': async (el) => {
     const t = $('#summaryText')?.value.trim();
     if (!t) { toast('The text is empty'); return; }
-    toast(await copyText(t) ? 'Copied – paste into Marine Manager' : 'Could not copy');
+    const ok = el.dataset.rich ? await copyRich(t) : await copyText(t);
+    toast(ok ? 'Copied – paste into Marine Manager' : 'Could not copy');
   },
   'save-key': () => {
     const v = $('#apiKey')?.value.trim();
@@ -1786,7 +1821,11 @@ function bindEvents() {
   document.addEventListener('input', (ev) => {
     const el = ev.target;
     if (el.closest('[data-editor]')) saveDraftLocal();
-    if (el.dataset.input === 'summary') saveSummaryText(el.dataset.key, el.value);
+    if (el.dataset.input === 'summary') {
+      saveSummaryText(el.dataset.key, el.value);
+      const pv = $('#reportPreview');
+      if (pv && el.dataset.rich) { pv.innerHTML = reportHtml(el.value); pv.hidden = !el.value.trim(); }
+    }
     if (el.classList.contains('crew-count')) updateCrewTotal();
     if (el.dataset.input === 'area-search') {
       const q = el.value.trim().toLowerCase().replace(/\s+/g, '');
