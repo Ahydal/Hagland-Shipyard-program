@@ -1,6 +1,6 @@
 // Service worker: gjør at appen virker uten nett (f.eks. inne i skroget).
 // Øk versjonen når filene endres, så hentes ny versjon ved neste oppstart.
-const CACHE = 'tilsynsdagbok-v3.9.1';
+const CACHE = 'tilsynsdagbok-v3.10.0';
 const ASSETS = [
   './',
   './index.html',
@@ -17,7 +17,7 @@ const ASSETS = [
 ];
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting()));
+  event.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS.map((u) => new Request(u, { cache: 'reload' })))).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', (event) => {

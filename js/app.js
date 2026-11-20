@@ -2,7 +2,7 @@ import * as db from './db.js';
 import * as summary from './summary.js';
 import * as sync from './sync.js';
 
-const APP_VERSION = '3.9.1';
+const APP_VERSION = '3.10.0';
 
 /* ------------------------------------------------------------------ */
 /* Konstanter                                                          */
@@ -1661,6 +1661,10 @@ const ACTIONS = {
     runSync();
   },
   'sync-now': () => runSync(),
+  'apply-update': () => {
+    if (editorEl().open && state.draft?.dirty && !confirm('You have an unsaved entry. It is kept as a draft and restored after the update. Update now?')) return;
+    location.reload();
+  },
   'copy-for-claude': async (el) => {
     const kind = el.dataset.kind || 'week';
     const { text, total } = await notesFor(kind);
@@ -1903,6 +1907,16 @@ function bindEvents() {
   });
 }
 
+/** Varsel om ny versjon. Oppdaterer ikke av seg selv, så en registrering som skrives ikke går tapt. */
+function showUpdateBanner() {
+  if ($('#updateBanner')) return;
+  document.body.insertAdjacentHTML('beforeend', `
+    <div id="updateBanner" class="update-banner" role="status">
+      <span>${icon('refresh')} A new version of Site Diary is available.</span>
+      <button class="btn small primary" data-action="apply-update">Update</button>
+    </div>`);
+}
+
 /* ------------------------------------------------------------------ */
 /* Oppstart                                                            */
 /* ------------------------------------------------------------------ */
@@ -1934,7 +1948,14 @@ async function init() {
   db.orphanPhotoIds(state.draft?.entry.id).then((ids) => ids.length && db.delMany('photos', ids)).catch(() => {});
 
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
-    navigator.serviceWorker.register('sw.js').catch((err) => console.warn('SW feilet', err));
+    // Ny versjon: service workeren installeres i bakgrunnen og tar over – da vises «Update».
+    const hadController = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController) showUpdateBanner(); });
+    navigator.serviceWorker.register('sw.js').then((reg) => {
+      const check = () => reg.update().catch(() => {});
+      setInterval(check, 30 * 60e3);
+      document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') check(); });
+    }).catch((err) => console.warn('SW feilet', err));
   }
 }
 
