@@ -427,3 +427,20 @@ img.missing { background: repeating-linear-gradient(45deg, var(--surface-2), var
 .update-banner span { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; font-size: .92rem; }
 .update-banner .ico { width: 18px; height: 18px; }
 @media (min-width: 900px) { .update-banner { bottom: 24px; } }
+
+/* ---------- To do (PC) ---------- */
+.todo-add { display: flex; gap: 8px; flex-wrap: wrap; }
+.todo-add input[name=todoText] { flex: 1 1 260px; }
+.todo-add input[name=todoDate] { flex: 0 0 160px; width: 160px; }
+.todo-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.todo { display: flex; align-items: center; gap: 10px; padding: 6px 4px; border-bottom: 1px solid var(--line); }
+.todo:last-child { border-bottom: 0; }
+.todo input[type=checkbox] { width: 20px; height: 20px; accent-color: var(--navy-2); flex: none; cursor: pointer; }
+.todo-text { flex: 1; min-width: 0; cursor: text; }
+.todo.done .todo-text { text-decoration: line-through; color: var(--muted); }
+.todo-date { font-size: .8rem; font-weight: 600; color: var(--muted); white-space: nowrap; }
+.todo-date.overdue { color: var(--danger); }
+.todo-date.today { color: var(--accent); }
+.todo-del { width: 32px; height: 32px; color: var(--muted); opacity: .5; }
+.todo:hover .todo-del { opacity: 1; }
+.todo-done-list summary { cursor: pointer; padding: 6px 0; }
