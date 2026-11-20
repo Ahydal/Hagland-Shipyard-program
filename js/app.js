@@ -2,7 +2,7 @@ import * as db from './db.js';
 import * as summary from './summary.js';
 import * as sync from './sync.js';
 
-const APP_VERSION = '3.7.0';
+const APP_VERSION = '3.7.1';
 
 /* ------------------------------------------------------------------ */
 /* Konstanter                                                          */
