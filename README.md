@@ -34,8 +34,9 @@ Appen er på engelsk. Knappenavnene under er de du ser i appen.
 Under Settings → **Lists** legger du inn faste lister per skip for tanker/rom, seksjoner og utstyr (én per linje), og velger med **«List»** når du registrerer.
 Listene deles mellom iPhone og PC.
 
-**Bilder i OneDrive og galleri:** hvert bilde legges også i `<skip>\By area\…` (tank/rom, ellers dekk/seksjon), `<skip>\By section\Section 120\…`
-og `<skip>\By equipment\Main engine\…` når det er satt. I «Photos» på PC velger du inndeling med **Room / tank · Section · Equipment**, og bildene vises per uke.
+**Bilder i OneDrive og galleri:** hvert bilde lagres én gang, i `<skip>\By area\<tank/rom>\` (ellers dekk eller seksjon).
+Dagsmappene (`<skip>\<dato>\`) har bare Word-dagboken «Daily log», med bildene inne i dokumentet.
+I «Photos» på PC kan du likevel gruppere på **Room / tank · Section · Equipment**, og bildene vises per uke.
 **«Rename»** gir en gruppe nytt navn: registreringene, lista og OneDrive-mappene oppdateres.
 
 **Sending som ikke kom fram:** endringer regnes ikke som levert før PC-en har bekreftet dem via «Get from PC». Til da blir de med i hver sending,
