@@ -2,7 +2,7 @@ import * as db from './db.js';
 import * as summary from './summary.js';
 import * as sync from './sync.js';
 
-const APP_VERSION = '3.11.0';
+const APP_VERSION = '3.11.1';
 
 /* ------------------------------------------------------------------ */
 /* Konstanter                                                          */
@@ -331,6 +331,7 @@ async function render() {
   if (token !== renderToken) return;
   const main = $('#main');
   main.classList.toggle('wide', ['week', 'dayreport', 'photos'].includes(state.view));
+  main.classList.toggle('xwide', state.view === 'week');
   main.innerHTML = html;
   hydrateThumbs(main);
   if (state.view === 'week') { renderWeekFeed(); renderTodos(); }
@@ -510,7 +511,7 @@ const VIEWS = {
         <button class="icon-btn" data-action="week-step" data-step="7" aria-label="Next week" ${isThisWeek ? 'disabled' : ''}>${icon('right')}</button>
       </div>
 
-      <div class="week-grid">
+      <div class="week-grid has-todo">
         <aside class="week-side">
           ${sync.canUseFolder() ? oneDriveCard() : ''}
           <div class="card summary-card">
@@ -551,8 +552,11 @@ const VIEWS = {
           </div>
         </aside>
 
-        <div class="week-main desktop-only">
+        <aside class="week-todo desktop-only">
           <div class="card todo-card" id="todoCard"></div>
+        </aside>
+
+        <div class="week-main desktop-only">
           <div class="card">
             <div class="feed-head">
               <h2>This week's entries</h2>

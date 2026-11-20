@@ -444,3 +444,46 @@ img.missing { background: repeating-linear-gradient(45deg, var(--surface-2), var
 .todo-del { width: 32px; height: 32px; color: var(--muted); opacity: .5; }
 .todo:hover .todo-del { opacity: 1; }
 .todo-done-list summary { cursor: pointer; padding: 6px 0; }
+
+/* ---------- To do som egen kolonne til venstre (Week, PC) ---------- */
+.main.xwide { max-width: 1680px; }
+.week-todo { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.todo-card .todo-add input[name=todoText], .todo-card .todo-add input[name=todoDate] { flex: 1 1 100%; width: 100%; }
+.todo-card .todo-add .btn { width: 100%; }
+@media (min-width: 900px) and (max-width: 1279px) {
+  /* Ikke plass til tre kolonner: To do over registreringene */
+  .week-grid.has-todo .week-todo { grid-column: 1; grid-row: 1; }
+  .week-grid.has-todo .week-main { grid-column: 1; grid-row: 2; }
+  .week-grid.has-todo .week-side { grid-column: 2; grid-row: 1 / span 2; }
+  .week-grid.has-todo .todo-card .todo-add input[name=todoText] { flex: 1 1 260px; width: auto; }
+  .week-grid.has-todo .todo-card .todo-add input[name=todoDate] { flex: 0 0 160px; width: 160px; }
+  .week-grid.has-todo .todo-card .todo-add .btn { width: auto; }
+}
+@media (min-width: 1280px) {
+  .week-grid.has-todo { grid-template-columns: 300px minmax(0, 1.5fr) minmax(360px, 1fr); }
+  .week-grid.has-todo .week-todo { grid-column: 1; grid-row: 1; position: sticky; top: 80px; max-height: calc(100vh - 100px); overflow-y: auto; }
+  .week-grid.has-todo .week-main { grid-column: 2; grid-row: 1; }
+  .week-grid.has-todo .week-side { grid-column: 3; grid-row: 1; }
+}
+/* Kompakt To do-kolonne */
+@media (min-width: 1280px) {
+  .week-grid.has-todo { grid-template-columns: 240px minmax(0, 1.6fr) minmax(360px, 1fr); }
+  .week-todo .todo-card { padding: 12px; gap: 8px; }
+  .week-todo .todo-card h2 { font-size: .95rem; }
+  .week-todo .todo-add { gap: 6px; }
+  .week-todo .todo-add input { min-height: 36px; padding: 6px 9px; font-size: .88rem; }
+  .week-todo .todo-add .btn { min-height: 34px; font-size: .85rem; }
+  .week-todo .todo { gap: 7px; padding: 5px 0; font-size: .88rem; align-items: flex-start; }
+  .week-todo .todo input[type=checkbox] { width: 17px; height: 17px; margin-top: 2px; }
+  .week-todo .todo-text { line-height: 1.3; }
+  .week-todo .todo-date { font-size: .72rem; margin-top: 2px; }
+  .week-todo .todo-del { width: 22px; height: 22px; }
+  .week-todo .todo-del .ico { width: 14px; height: 14px; }
+}
+@media (min-width: 1280px) {
+  .week-todo .todo { display: grid; grid-template-columns: 17px minmax(0, 1fr) 22px; column-gap: 7px; row-gap: 1px; }
+  .week-todo .todo input[type=checkbox] { grid-column: 1; grid-row: 1; }
+  .week-todo .todo-text { grid-column: 2; grid-row: 1; }
+  .week-todo .todo-date { grid-column: 2; grid-row: 2; margin-top: 0; }
+  .week-todo .todo-del { grid-column: 3; grid-row: 1; }
+}
