@@ -2,7 +2,7 @@ import * as db from './db.js';
 import * as summary from './summary.js';
 import * as sync from './sync.js';
 
-const APP_VERSION = '3.11.1';
+const APP_VERSION = '3.12.0';
 
 /* ------------------------------------------------------------------ */
 /* Konstanter                                                          */
@@ -1177,8 +1177,10 @@ async function runSync({ quiet = false } = {}) {
     if (JSON.stringify(state.settings.ships) !== shipsBefore) await saveSettings();
     s.lastAt = Date.now();
     s.missing = res.missing || 0;
-    if (res.imported || (res.areas && state.view === 'photos')) {
-      toast(`Imported ${res.imported} ${res.imported === 1 ? 'package' : 'packages'} from iPhone`);
+    if (res.imported || res.merged || (res.areas && state.view === 'photos')) {
+      const msg = [res.imported && `Imported ${res.imported} ${res.imported === 1 ? 'package' : 'packages'} from iPhone`,
+        res.merged && 'updated with changes from the other PC'].filter(Boolean).join(' · ');
+      if (msg) toast(msg.charAt(0).toUpperCase() + msg.slice(1));
       if (!editorEl().open && !document.activeElement?.matches('textarea, input')) render();
     } else if (!quiet) {
       toast(res.days ? `Updated ${res.days} ${res.days === 1 ? 'day' : 'days'} in OneDrive` : 'Everything is up to date');
@@ -1560,6 +1562,11 @@ async function importBackup(file) {
   if (data?.app !== 'tilsynsdagbok') { toast('This file is not a Site Diary file'); return; }
   if (!confirm(`Import ${data.entries?.length || 0} entries and ${data.photos?.length || 0} photos?\nThe newest version of each entry is kept.`)) return;
   if (!data.settings) data.settings = (data.meta || []).find((m) => m.key === 'settings')?.value;
+  if (data.meta) {
+    data.crew ??= data.meta.filter((m) => String(m.key).startsWith('crew:'));
+    data.todos ??= data.meta.find((m) => m.key === 'todos') || null;
+    data.texts ??= data.meta.filter((m) => /^d?summary:/.test(m.key)).map((m) => ({ key: m.key, text: m.text, updatedAt: m.updatedAt || 0 }));
+  }
   await sync.applyBundle(data, state.settings);
   await saveSettings();
   thumbUrls.forEach((u) => URL.revokeObjectURL(u));
