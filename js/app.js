@@ -2,7 +2,7 @@ import * as db from './db.js';
 import * as summary from './summary.js';
 import * as sync from './sync.js';
 
-const APP_VERSION = '3.12.0';
+const APP_VERSION = '3.12.1';
 
 /* ------------------------------------------------------------------ */
 /* Konstanter                                                          */
@@ -792,8 +792,19 @@ const VIEWS = {
 /* To do (PC): enkel liste med valgfri dato                            */
 /* ------------------------------------------------------------------ */
 
-const getTodos = async () => (await db.get('meta', 'todos'))?.list || [];
-const saveTodos = (list) => db.put('meta', { key: 'todos', list, updatedAt: Date.now() });
+// Slettede punkter beholdes en stund som «deleted», så slettingen også når den andre PC-en
+const getAllTodos = async () => (await db.get('meta', 'todos'))?.list || [];
+const getTodos = async () => (await getAllTodos()).filter((x) => !x.deleted);
+const saveTodos = async (visible) => {
+  const now = Date.now();
+  const keep = new Map(visible.map((x) => [x.id, x]));
+  const all = (await getAllTodos()).map((x) => keep.get(x.id) || (x.deleted ? x : { ...x, deleted: true, updatedAt: now }));
+  visible.forEach((x) => { if (!all.some((y) => y.id === x.id)) all.push(x); });
+  const pruned = all.filter((x) => !(x.deleted && now - (x.updatedAt || 0) > 60 * 864e5));
+  await db.put('meta', { key: 'todos', list: pruned, updatedAt: now });
+  afterLocalChange();
+};
+const touch = (x) => { x.updatedAt = Date.now(); return x; };
 
 async function renderTodos() {
   const box = $('#todoCard');
@@ -831,7 +842,7 @@ async function addTodo() {
   const text = f.elements.todoText.value.trim();
   if (!text) { f.elements.todoText.focus(); return; }
   const list = await getTodos();
-  list.push({ id: uid(), text, date: f.elements.todoDate.value || '', done: false, createdAt: Date.now() });
+  list.push({ id: uid(), text, date: f.elements.todoDate.value || '', done: false, createdAt: Date.now(), updatedAt: Date.now() });
   await saveTodos(list);
   await renderTodos();
   $('[data-todo-form]')?.elements.todoText.focus();
@@ -1737,6 +1748,7 @@ const ACTIONS = {
     const date = prompt('Date (YYYY-MM-DD), leave empty for none:', x.date || '');
     x.text = text.trim();
     if (date !== null) x.date = /^\d{4}-\d{2}-\d{2}$/.test(date.trim()) ? date.trim() : '';
+    touch(x);
     await saveTodos(list);
     renderTodos();
   },
@@ -1861,7 +1873,7 @@ const CHANGES = {
   'todo-done': async (el) => {
     const list = await getTodos();
     const x = list.find((y) => y.id === el.dataset.id);
-    if (x) { x.done = el.checked; x.doneAt = el.checked ? Date.now() : null; }
+    if (x) { x.done = el.checked; x.doneAt = el.checked ? Date.now() : null; touch(x); }
     await saveTodos(list);
     setTimeout(renderTodos, 250); // la avkrysningen synes et øyeblikk
   },

@@ -246,11 +246,22 @@ export async function applyBundle(data, settings, { markSent = false } = {}) {
     if (cur && (cur.updatedAt || 0) <= t.deletedAt) { await db.deleteEntry(t.id); changed++; }
   }
 
-  // To do (PC) og rapporttekster: nyeste vinner
-  if (data.todos?.list && (data.todos.updatedAt || 0) > ((await db.get('meta', 'todos'))?.updatedAt || 0)) {
-    await db.put('meta', { key: 'todos', list: data.todos.list, updatedAt: data.todos.updatedAt });
-    changed++;
+  // To do (PC): slås sammen punkt for punkt – nyeste versjon av hvert punkt vinner (også slettinger)
+  if (data.todos?.list?.length) {
+    const cur = (await db.get('meta', 'todos'))?.list || [];
+    const byId = new Map(cur.map((x) => [x.id, x]));
+    const stamp = (x) => x.updatedAt || x.doneAt || x.createdAt || 0;
+    let n = 0;
+    for (const x of data.todos.list) {
+      const mine = byId.get(x.id);
+      if (!mine || stamp(x) > stamp(mine)) { byId.set(x.id, x); n++; }
+    }
+    if (n) {
+      await db.put('meta', { key: 'todos', list: [...byId.values()], updatedAt: Math.max(Date.now(), data.todos.updatedAt || 0) });
+      changed += n;
+    }
   }
+  // Rapporttekster: nyeste vinner
   for (const t of data.texts || []) {
     if (!/^d?summary:/.test(t.key || '')) continue;
     const cur = await db.get('meta', t.key);
