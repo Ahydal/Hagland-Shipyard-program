@@ -65,6 +65,9 @@ export async function addTombstone(entry) {
 }
 
 const isCrew = (m) => String(m.key).startsWith('crew:');
+/** Rapporttekster (uke- og dagsrapport) lagret i appen. */
+const allTexts = async () => (await db.getAll('meta')).filter((m) => /^d?summary:/.test(m.key))
+  .map((m) => ({ key: m.key, text: m.text, updatedAt: m.updatedAt || 0 }));
 export const allCrew = async () => (await db.getAll('meta')).filter(isCrew);
 
 /** Antall endringer som aldri er sendt (vises på «Send»-knappen). */
@@ -243,6 +246,17 @@ export async function applyBundle(data, settings, { markSent = false } = {}) {
     if (cur && (cur.updatedAt || 0) <= t.deletedAt) { await db.deleteEntry(t.id); changed++; }
   }
 
+  // To do (PC) og rapporttekster: nyeste vinner
+  if (data.todos?.list && (data.todos.updatedAt || 0) > ((await db.get('meta', 'todos'))?.updatedAt || 0)) {
+    await db.put('meta', { key: 'todos', list: data.todos.list, updatedAt: data.todos.updatedAt });
+    changed++;
+  }
+  for (const t of data.texts || []) {
+    if (!/^d?summary:/.test(t.key || '')) continue;
+    const cur = await db.get('meta', t.key);
+    if (!cur || (cur.updatedAt || 0) < (t.updatedAt || 0)) { await db.put('meta', { key: t.key, text: t.text, updatedAt: t.updatedAt }); changed++; }
+  }
+
   // Delte innstillinger: bruk det som er sist endret
   const s = data.settings;
   if (s?.ships && (s.shipsUpdatedAt || 0) > (settings.shipsUpdatedAt || 0)) {
@@ -321,35 +335,107 @@ async function inboxDirs(root) {
   return dirs;
 }
 
-/** Leser inn nye pakker fra innboksen og flytter dem til <innboks>/Processed. */
-async function importInbox(root, settings) {
+/** Alle pakkefiler: i innboksen (nye) og i Processed/Behandlet (lest før, kanskje av en annen PC). */
+async function listBundleFiles(root) {
+  const out = [];
+  for (const inbox of await inboxDirs(root)) {
+    for await (const [name, h] of inbox.entries()) {
+      if (h.kind === 'file' && /\.(json|txt)$/i.test(name)) out.push({ inbox, dir: inbox, name, h, inInbox: true, path: `${inbox.name}/${name}` });
+      else if (h.kind === 'directory' && /^(processed|behandlet)$/i.test(name)) {
+        for await (const [n2, h2] of h.entries()) {
+          if (h2.kind === 'file' && /\.(json|txt)$/i.test(n2)) out.push({ inbox, dir: h, name: n2, h: h2, inInbox: false, path: `${inbox.name}/${name}/${n2}` });
+        }
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Leser inn alle sendinger denne PC-en ikke har lest før – både nye i innboksen og de som en annen PC
+ * allerede har flyttet til Processed. Nye filer i innboksen flyttes til <innboks>/Processed.
+ * Leses i tidsrekkefølge, så en sletting ikke blir «angret» av en eldre sending.
+ */
+async function importInbox(root, settings, onProgress) {
+  const seenFiles = (await db.get('meta', 'seenFiles'))?.map || {};
+  const seenBundles = new Set((await db.get('meta', 'seenBundles'))?.keys || []);
+  const fileKey = (path, f) => `${path}|${f.size}|${f.lastModified}`;
+
+  // Finn kandidater (les bare starten av fila for å få tidspunktet)
+  const cands = [];
+  for (const x of await listBundleFiles(root)) {
+    const file = await x.h.getFile();
+    const fk = fileKey(x.path, file);
+    if (!x.inInbox && seenFiles[fk]) continue;
+    const head = await file.slice(0, 400).text();
+    if (!head.trimStart().startsWith('{"app":"tilsynsdagbok"')) { seenFiles[fk] = 1; continue; } // ikke en pakke
+    const createdAt = Number(/"createdAt":(\d+)/.exec(head)?.[1]) || Date.parse(/"exportedAt":"([^"]+)"/.exec(head)?.[1] || '') || file.lastModified;
+    cands.push({ ...x, file, fk, createdAt });
+  }
+  cands.sort((a, b) => a.createdAt - b.createdAt);
+
   let files = 0;
   let changed = 0;
-  for (const inbox of await inboxDirs(root)) {
-  let processed = null;
-  for await (const [name, h] of inbox.entries()) {
-    if (h.kind !== 'file' || !/\.(json|txt)$/i.test(name)) continue;
-    const file = await h.getFile();
+  const p2 = (n) => String(n).padStart(2, '0');
+  for (let i = 0; i < cands.length; i++) {
+    const c = cands[i];
+    if (cands.length > 3) onProgress?.(`Reading packages (${i + 1}/${cands.length}) …`);
     let data;
-    try {
-      const text = await file.text();
-      if (!text.trimStart().startsWith('{"app":"tilsynsdagbok"')) continue; // ikke en pakke
-      data = JSON.parse(text);
-    } catch { continue; }
-    if (data?.app !== 'tilsynsdagbok') continue;
-    changed += await applyBundle(data, settings);
-    processed ??= await inbox.getDirectoryHandle(PROCESSED, { create: true });
-    // Fast, unikt navn i Processed (tekstfiler fra iPhone heter bare «tekst», «tekst 2» …)
-    const d = new Date(data.createdAt || Date.now());
-    const p2 = (n) => String(n).padStart(2, '0');
-    const keep = /^tilsyn/i.test(name) ? name
-      : `tilsyn_${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}_${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}${data.parts > 1 ? `_part${data.part}of${data.parts}` : ''}.json`;
-    await writeFile(processed, keep, file);
-    await removeQuiet(inbox, name);
-    files++;
+    try { data = JSON.parse(await c.file.text()); } catch { seenFiles[c.fk] = 1; continue; }
+    if (data?.app !== 'tilsynsdagbok') { seenFiles[c.fk] = 1; continue; }
+    const bk = `${data.kind || 'old'}:${data.createdAt || data.exportedAt || c.createdAt}:${data.part || 1}`;
+    if (!seenBundles.has(bk)) {
+      changed += await applyBundle(data, settings);
+      seenBundles.add(bk);
+      files++;
+    }
+    if (c.inInbox) {
+      // Flytt til Processed med fast, unikt navn (tekstfiler fra iPhone heter bare «tekst», «tekst 2» …)
+      const processed = await c.inbox.getDirectoryHandle(PROCESSED, { create: true });
+      const d = new Date(data.createdAt || Date.now());
+      let keep = /^tilsyn/i.test(c.name) ? c.name
+        : `tilsyn_${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}_${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}${String(d.getMilliseconds()).padStart(3, '0')}${data.parts > 1 ? `_part${data.part}of${data.parts}` : ''}.json`;
+      // Aldri overskriv en annen sending i Processed
+      for (let n = 2; await processed.getFileHandle(keep).then(() => true, () => false); n++) keep = keep.replace(/(_\d+)?\.json$/, `_${n}.json`);
+      await writeFile(processed, keep, c.file);
+      await removeQuiet(c.inbox, c.name);
+      const moved = await (await processed.getFileHandle(keep)).getFile();
+      seenFiles[fileKey(`${c.inbox.name}/${PROCESSED}/${keep}`, moved)] = 1;
+    } else {
+      seenFiles[c.fk] = 1;
+    }
   }
-  }
+  await db.put('meta', { key: 'seenFiles', map: seenFiles });
+  await db.put('meta', { key: 'seenBundles', keys: [...seenBundles] });
   return { files, changed };
+}
+
+/** Fast id for denne PC-en (så den kjenner igjen sin egen «From PC»-fil). */
+async function deviceId() {
+  let rec = await db.get('meta', 'deviceId');
+  if (!rec) { rec = { key: 'deviceId', id: (crypto.randomUUID?.() || String(Date.now()) + Math.random()) }; await db.put('meta', rec); }
+  return rec.id;
+}
+
+/** Les inn «From PC»-fila hvis en annen PC har skrevet den (rename, bemanning, lister, To do, PC-bilder …). */
+async function mergeOtherSnapshot(root, settings) {
+  let file;
+  try { file = await (await (await root.getDirectoryHandle(FROM_PC)).getFileHandle(SNAPSHOT)).getFile(); } catch { return 0; }
+  const head = await file.slice(0, 400).text();
+  const writer = /"writer":"([^"]+)"/.exec(head)?.[1];
+  if (writer && writer === await deviceId()) return 0;
+  const createdAt = Number(/"createdAt":(\d+)/.exec(head)?.[1]) || 0;
+  if (createdAt <= ((await db.get('meta', 'mergedSnapshot'))?.createdAt || 0)) return 0;
+  let data;
+  try { data = JSON.parse(await file.text()); } catch { return 0; }
+  const n = await applyBundle(data, settings);
+  // Ta med den andre PC-ens slettinger videre, så iPhone også får dem
+  const mine = (await db.get('meta', 'pcTombstones'))?.list || [];
+  const ids = new Set(mine.map((t) => t.id));
+  const merged = [...mine, ...(data.tombstones || []).filter((t) => !ids.has(t.id))].slice(-2000);
+  await db.put('meta', { key: 'pcTombstones', list: merged });
+  await db.put('meta', { key: 'mergedSnapshot', createdAt });
+  return n;
 }
 
 /* ---------- Sortert utskrift per skip og dag ---------- */
@@ -470,7 +556,8 @@ export async function syncFolder(settings, h) {
   if (!root) throw new Error('No OneDrive folder selected.');
   if (await permission(root) !== 'granted') throw new Error('The app has no access to the folder. Click “Connect”.');
 
-  const inbox = await importInbox(root, settings);
+  const inbox = await importInbox(root, settings, h.onProgress);
+  const merged = await mergeOtherSnapshot(root, settings);
 
   const entries = await db.getAll('entries');
   const groups = new Map();
@@ -512,7 +599,7 @@ export async function syncFolder(settings, h) {
   const snapshot = await writeSnapshot(root, settings);
   await db.put('meta', { key: 'lastSync', at: Date.now() });
   const missing = (await missingPhotoIds()).length;
-  return { imported: inbox.files, changed: inbox.changed, days, areas, folder: root.name, snapshot, missing };
+  return { imported: inbox.files, changed: inbox.changed, merged, days, areas, folder: root.name, snapshot, missing };
 }
 
 /* ------------------------------------------------------------------ */
@@ -543,8 +630,12 @@ async function writeSnapshot(root, settings) {
   const crew = await allCrew();
   const tombstones = (await db.get('meta', 'pcTombstones'))?.list || [];
   const missing = await missingPhotoIds();
+  const todos = await db.get('meta', 'todos');
+  const texts = await allTexts();
   const sig = [
     `missing:${missing.length}`,
+    `todos:${todos?.updatedAt || 0}`,
+    texts.map((t) => `${t.key}:${t.updatedAt || 0}`).sort().join(','),
     entries.map((e) => `${e.id}:${e.updatedAt || 0}`).sort().join(','),
     crew.map((c) => `${c.key}:${c.updatedAt || 0}`).sort().join(','),
     tombstones.length, JSON.stringify(sharedSettings(settings)),
@@ -553,9 +644,10 @@ async function writeSnapshot(root, settings) {
 
   const createdAt = Date.now();
   const parts = [
-    `{"app":"tilsynsdagbok","version":3,"kind":"pc-snapshot","createdAt":${createdAt},`,
+    `{"app":"tilsynsdagbok","version":3,"kind":"pc-snapshot","writer":${JSON.stringify(await deviceId())},"createdAt":${createdAt},`,
     `"settings":${JSON.stringify(sharedSettings(settings))},`,
     `"missingPhotos":${JSON.stringify(missing)},`,
+    `"todos":${JSON.stringify(todos || null)},"texts":${JSON.stringify(texts)},`,
     `"entries":${JSON.stringify(entries.map(({ sentAt, confirmedAt, photosSentAt, ...e }) => e))},`,
     `"crew":${JSON.stringify(crew.map(({ sentAt, confirmedAt, ...c }) => c))},`,
     `"tombstones":${JSON.stringify(tombstones)},"photos":[`,
