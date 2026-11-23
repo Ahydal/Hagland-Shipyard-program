@@ -2,7 +2,7 @@ import * as db from './db.js';
 import * as summary from './summary.js';
 import * as sync from './sync.js';
 
-const APP_VERSION = '3.12.1';
+const APP_VERSION = '3.13.0';
 
 /* ------------------------------------------------------------------ */
 /* Konstanter                                                          */
@@ -177,6 +177,10 @@ const state = {
   weekStart: mondayOf(today()),
   weekShip: 'all',
   weekQuery: '',
+  inspShip: 'all',
+  inspResult: 'all',
+  inspQuery: '',
+  inspItem: null,
   weekPhotoOrder: [],
   galleryShip: null,
   galleryArea: 'all',
@@ -296,12 +300,13 @@ function renderTopbar() {
       <button class="${state.view === 'day' ? 'on' : ''}" data-action="nav" data-view="day">${icon('camera')} Diary</button>
       <button class="${state.view === 'dayreport' ? 'on' : ''}" data-action="nav" data-view="dayreport">${icon('report')} Daily report</button>
       <button class="${state.view === 'photos' ? 'on' : ''}" data-action="nav" data-view="photos">${icon('image')} Photos</button>
+      <button class="${state.view === 'inspections' ? 'on' : ''}" data-action="nav" data-view="inspections">${icon('check')} Inspections</button>
     </nav>`;
   const gear = `<button class="icon-btn" data-action="nav" data-view="settings" aria-label="Settings">${icon('gear')}</button>`;
-  if (state.view === 'week' || state.view === 'dayreport' || state.view === 'photos') {
+  if (['week', 'dayreport', 'photos', 'inspections'].includes(state.view)) {
     $('#topbar').innerHTML = `
       <button class="icon-btn mobile-only" data-action="nav" data-view="day" aria-label="Back">${icon('left')}</button>
-      <h1 class="topbar-title mobile-only">${({ week: 'Weekly report', dayreport: 'Daily report', photos: 'Photos' })[state.view]}</h1>
+      <h1 class="topbar-title mobile-only">${({ week: 'Weekly report', dayreport: 'Daily report', photos: 'Photos', inspections: 'Inspections' })[state.view]}</h1>
       ${tabs}
       <span class="spacer"></span>
       ${gear}`;
@@ -330,11 +335,12 @@ async function render() {
   const html = await VIEWS[state.view]();
   if (token !== renderToken) return;
   const main = $('#main');
-  main.classList.toggle('wide', ['week', 'dayreport', 'photos'].includes(state.view));
+  main.classList.toggle('wide', ['week', 'dayreport', 'photos', 'inspections'].includes(state.view));
   main.classList.toggle('xwide', state.view === 'week');
   main.innerHTML = html;
   hydrateThumbs(main);
   if (state.view === 'week') { renderWeekFeed(); renderTodos(); }
+  if (state.view === 'inspections') renderInspFeed();
 }
 
 function entryCard(e, { showShip = false } = {}) {
@@ -350,6 +356,7 @@ function entryCard(e, { showShip = false } = {}) {
       ${inspBadge(e)}
       ${loc ? `<span class="loc">${icon('pin')}${esc(loc)}</span>` : ''}
     </div>
+    ${e.inspection?.parties?.length ? `<p class="insp-parties muted small">Attended by ${esc(e.inspection.parties.join(', '))}</p>` : ''}
     ${e.text ? `<p class="entry-text">${esc(e.text)}</p>` : '<p class="entry-text muted">No note</p>'}
     ${ids.length ? `<div class="thumbs">${ids.slice(0, 6).map((id, i) =>
       `<img data-photo="${id}" data-action="view-photo" data-entry="${e.id}" data-index="${i}" alt="Photo ${i + 1}" loading="lazy">`).join('')}
@@ -456,6 +463,7 @@ const VIEWS = {
         <span class="daystats-actions">
           ${sync.canUseFolder() ? '' : `<label class="btn small ghost">${icon('refresh')} Get from PC<input type="file" accept=".json,application/json,text/plain" data-change="import-pc" hidden></label>`}
           <button class="btn small ghost" data-action="nav" data-view="dayreport">${icon('report')} Daily report</button>
+          <button class="btn small ghost mobile-only" data-action="nav" data-view="inspections">${icon('check')} Inspections</button>
         </span>
       </div>
 
@@ -631,6 +639,64 @@ const VIEWS = {
             <h2>${esc(x.sh.name)} <span class="muted small">(${x.entries.length})</span></h2>
             ${x.entries.length ? `<div class="list">${x.entries.map((e) => entryCard(e)).join('')}</div>` : '<p class="muted">No entries.</p>'}
           </div>`).join('')}
+        </div>
+      </div>
+    </section>`;
+  },
+
+  async inspections() {
+    const ships = state.settings.ships;
+    if (state.inspShip !== 'all' && !ships.some((x) => x.id === state.inspShip)) state.inspShip = 'all';
+    const all = (await db.getAll('entries')).map(normalize).filter((e) => e.inspection)
+      .filter((e) => state.inspShip === 'all' || e.shipId === state.inspShip)
+      .sort((a, b) => (a.date + (a.time || '')).localeCompare(b.date + (b.time || '')) || (a.createdAt || 0) - (b.createdAt || 0));
+    const items = inspItems(all);
+    state.inspCache = { all, items };
+    if (state.inspItem && !items.some((x) => x.key === state.inspItem)) state.inspItem = null;
+
+    const count = (r) => all.filter((e) => (e.inspection.result || 'pending') === r).length;
+    const open = items.filter((x) => x.status !== 'accepted').length;
+    const tile = (r, label, n) => `<button class="insp-tile ${r} ${state.inspResult === r ? 'on' : ''}" data-action="insp-result" data-result="${r}"><b>${n}</b><span>${label}</span></button>`;
+    const shipName = (id) => ships.find((x) => x.id === id)?.name || '';
+    const short = (d) => parseISODate(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+
+    return `
+    <section class="view">
+      <div class="gallery-top">
+        <div class="chips">
+          <button class="chip-f ${state.inspShip === 'all' ? 'on' : ''}" data-action="insp-ship" data-ship="all">All vessels</button>
+          ${ships.map((x) => `<button class="chip-f ${x.id === state.inspShip ? 'on' : ''}" data-action="insp-ship" data-ship="${x.id}">${esc(x.name)}</button>`).join('')}
+        </div>
+      </div>
+
+      <div class="insp-tiles">
+        ${tile('all', 'Inspections', all.length)}
+        ${tile('accepted', 'Accepted', count('accepted'))}
+        ${tile('comments', 'With comments', count('comments'))}
+        ${tile('rejected', 'Rejected', count('rejected'))}
+        ${tile('pending', 'No result', count('pending'))}
+      </div>
+
+      <div class="insp-layout">
+        <div class="card insp-status">
+          <div class="feed-head"><h2>Status per item</h2><span class="muted small">${open ? `${open} open` : items.length ? 'All accepted' : ''}</span></div>
+          <p class="muted small">Latest result for each equipment item or area. Open items first. Click one to see its inspections.</p>
+          ${items.length ? `<div class="insp-items">
+            <button class="insp-item ${!state.inspItem ? 'on' : ''}" data-action="insp-item" data-key=""><span class="insp-item-name">All items</span><span class="muted small">${items.length}</span></button>
+            ${items.map((x) => `<button class="insp-item ${state.inspItem === x.key ? 'on' : ''}" data-action="insp-item" data-key="${esc(x.key)}">
+              <span class="insp-item-name">${esc(x.name)}${state.inspShip === 'all' && ships.length > 1 ? ` <span class="ship-badge">${esc(shipName(x.shipId))}</span>` : ''}
+                <small class="muted">${x.kind === 'equipment' ? 'Equipment' : 'Area'} · last ${short(x.last.date)} · ${x.list.length}×</small></span>
+              <span class="insp-badge ${x.status}">${x.status === 'pending' ? 'No result' : summary.resultLabel(x.status)}</span>
+            </button>`).join('')}
+          </div>` : '<p class="muted">No inspections yet. Tick “Inspection” when you register an entry.</p>'}
+        </div>
+
+        <div class="card">
+          <div class="feed-head">
+            <h2 id="inspTitle">All inspections</h2>
+            <input type="search" class="feed-search" placeholder="Filter by text, location or party …" value="${esc(state.inspQuery)}" data-input="insp-query">
+          </div>
+          <div id="inspFeed"></div>
         </div>
       </div>
     </section>`;
@@ -961,6 +1027,61 @@ async function weekData(start) {
     const entries = perDay.flat().sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time) || (a.createdAt || 0) - (b.createdAt || 0));
     return { ship: s, entries, photos: entries.reduce((n, e) => n + e.photoIds.length, 0) };
   }));
+}
+
+/** Inspeksjoner gruppert per utstyr (hvis satt) ellers per område, med siste resultat som status. */
+function inspItems(list) {
+  const map = new Map();
+  for (const sid of new Set(list.map((e) => e.shipId))) {
+    const mine = list.filter((e) => e.shipId === sid);
+    const eqNames = sync.groupNames('equipment', mine);
+    const arNames = sync.groupNames('area', mine);
+    for (const e of mine) {
+      const eq = sync.groupOf('equipment', e.location);
+      const kind = eq.none ? 'area' : 'equipment';
+      const g = eq.none ? sync.groupOf('area', e.location) : eq;
+      const key = `${sid}|${kind}|${g.key}`;
+      if (!map.has(key)) map.set(key, { key, shipId: sid, kind, none: g.none, name: (kind === 'equipment' ? eqNames : arNames).get(g.key) || g.key, list: [] });
+      map.get(key).list.push(e);
+    }
+  }
+  const rank = { rejected: 0, comments: 1, pending: 2, accepted: 3 };
+  return [...map.values()].map((x) => {
+    const last = x.list[x.list.length - 1];
+    return { ...x, last, status: last.inspection.result || 'pending' };
+  }).sort((a, b) => rank[a.status] - rank[b.status] || (b.last.date + (b.last.time || '')).localeCompare(a.last.date + (a.last.time || '')));
+}
+
+function renderInspFeed() {
+  const box = $('#inspFeed');
+  if (!box || !state.inspCache) return;
+  const { all, items } = state.inspCache;
+  const item = items.find((x) => x.key === state.inspItem);
+  const words = state.inspQuery.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const list = (item ? item.list : all)
+    .filter((e) => state.inspResult === 'all' || (e.inspection.result || 'pending') === state.inspResult)
+    .filter((e) => {
+      if (!words.length) return true;
+      const hay = `${e.text} ${fmtLoc(e.location)} ${e.company} ${(e.inspection.parties || []).join(' ')}`.toLowerCase();
+      return words.every((w) => hay.includes(w));
+    })
+    .slice().sort((a, b) => (b.date + (b.time || '')).localeCompare(a.date + (a.time || '')) || (b.createdAt || 0) - (a.createdAt || 0));
+  const label = { all: '', accepted: 'Accepted', comments: 'With comments', rejected: 'Rejected', pending: 'No result' }[state.inspResult];
+  const title = $('#inspTitle');
+  if (title) title.innerHTML = `${esc(item ? item.name : 'All inspections')}${label ? ` · ${label}` : ''} <span class="muted small">(${list.length})</span>`;
+  if (!list.length) {
+    box.innerHTML = `<p class="muted">${all.length ? 'No matches.' : 'No inspections yet.'}</p>`;
+    return;
+  }
+  const showShip = state.inspShip === 'all' && state.settings.ships.length > 1;
+  let html = '';
+  let last = '';
+  for (const e of list) {
+    if (e.date !== last) { html += `<h3 class="feed-day">${cap(fmtLong(e.date))}</h3>`; last = e.date; }
+    html += entryCard(e, { showShip });
+  }
+  box.innerHTML = `<div class="list">${html}</div>`;
+  hydrateThumbs(box);
 }
 
 function renderWeekFeed() {
@@ -1626,6 +1747,9 @@ const ACTIONS = {
   'report-ship': (el) => { state.reportShip = el.dataset.ship; render(); },
   'gallery-ship': (el) => { state.galleryShip = el.dataset.ship; state.galleryArea = 'all'; render(); },
   'gallery-area': (el) => { state.galleryArea = el.dataset.key; render(); },
+  'insp-ship': (el) => { state.inspShip = el.dataset.ship; state.inspItem = null; render(); },
+  'insp-result': (el) => { state.inspResult = state.inspResult === el.dataset.result ? 'all' : el.dataset.result; render(); },
+  'insp-item': (el) => { state.inspItem = el.dataset.key || null; render(); },
   'gallery-dim': (el) => { state.galleryDim = el.dataset.dim; state.galleryArea = 'all'; render(); },
   'rename-area': async (el) => {
     const to = prompt(`Rename “${el.dataset.name}” to:`, el.dataset.name)?.trim();
@@ -1961,6 +2085,7 @@ function bindEvents() {
       $$('.area-pick').forEach((b) => { b.hidden = q && !b.dataset.area.toLowerCase().replace(/\s+/g, '').includes(q); });
     }
     if (el.dataset.input === 'week-query') { state.weekQuery = el.value; renderWeekFeed(); }
+    if (el.dataset.input === 'insp-query') { state.inspQuery = el.value; renderInspFeed(); }
   });
 
   // «Ta bilde» fra hovedskjermen → ny registrering med bildet

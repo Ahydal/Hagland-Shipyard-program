@@ -30,6 +30,9 @@ Appen er på engelsk. Knappenavnene under er de du ser i appen.
 **Inspeksjon:** huk av **«Inspection»**, velg resultat (Accepted / With comments / Rejected) og hvem som deltok. Det kommer tydelig med i dags- og ukesrapporten
 (avviste inspeksjoner havner under «Findings»). Hvem som kan delta, settes under Settings → Inspections.
 
+Fanen **«Inspections»** viser alle inspeksjoner: antall per resultat, **status per utstyr/område** (siste resultat gjelder, åpne punkter øverst)
+og en liste du kan filtrere på skip, resultat, punkt og fritekst. Klikk på en inspeksjon for å åpne den.
+
 **Sted, seksjon og utstyr:** under «Location on board» fyller du ut Section, Deck, «Room / tank» og **«Equipment / system»** (f.eks. Main engine, Hatch cover No. 2).
 Under Settings → **Lists** legger du inn faste lister per skip for tanker/rom, seksjoner og utstyr (én per linje), og velger med **«List»** når du registrerer.
 Listene deles mellom iPhone og PC.
