@@ -761,6 +761,8 @@ export function groupOf(dim, loc) {
     if (loc?.room) name = canonArea(loc.room);
     else if (loc?.deck) name = /^\d+$/.test(loc.deck.trim()) ? `Deck ${loc.deck.trim()}` : canonArea(loc.deck);
     else if (loc?.section) name = sectionName(loc.section);
+    else if (loc?.equipment) name = canonArea(loc.equipment);
+    else if (loc?.frame) name = `Frame ${canonArea(loc.frame)}`;
   } else if (dim === 'section') {
     if (loc?.section) name = sectionName(loc.section);
   } else if (dim === 'equipment') {
@@ -823,42 +825,72 @@ async function writeGroup(root, settings, h, dim) {
     });
   }
 
+  // Det som faktisk ligger i <skip>/<By …>/ nå – også filer skrevet av en annen PC eller før mappen ble valgt på nytt
+  // (nøkler og filnavn i små bokstaver: Windows/OneDrive skiller ikke på store og små)
+  const lc = (x) => x.toLowerCase();
+  const existing = new Map(); // "skip/gruppe" -> { dir, by, folder, names: Map(lc -> filnavn) }
+  for (const ship of settings.ships) {
+    const shipName = safeName(ship.name);
+    let by;
+    try { by = await (await root.getDirectoryHandle(shipName)).getDirectoryHandle(BY); } catch { continue; }
+    for await (const [an, ah] of by.entries()) {
+      if (ah.kind !== 'directory') continue;
+      const names = new Map();
+      for await (const [fn, fh] of ah.entries()) if (fh.kind === 'file') names.set(lc(fn), fn);
+      existing.set(lc(`${shipName}/${an}`), { dir: ah, by, folder: an, names });
+    }
+  }
+  const wantedIn = new Map(); // "skip/gruppe" -> Set(filnavn)
+  for (const w of wanted.values()) {
+    const k = lc(`${w.ship}/${w.area}`);
+    if (!wantedIn.has(k)) wantedIn.set(k, new Set());
+    wantedIn.get(k).add(lc(w.name));
+  }
+
+  let changed = 0;
+  // Fjern bilder appen har laget («2026-11-19 0937 … .jpg») som ikke lenger hører hjemme der
+  const APP_FILE = /^\d{4}-\d{2}-\d{2} \d{0,4}.*\.jpe?g$/i;
+  for (const [k, ex] of existing) {
+    const keep = wantedIn.get(k) || new Set();
+    for (const [l, fn] of [...ex.names]) {
+      if (keep.has(l) || !APP_FILE.test(fn)) continue;
+      await removeQuiet(ex.dir, fn);
+      ex.names.delete(l);
+      changed++;
+    }
+    if (!ex.names.size && !keep.size) { await removeQuiet(ex.by, ex.folder); existing.delete(k); }
+  }
+  for (const id of prev.keys()) if (!wanted.has(id)) await db.del('meta', `${prefix}${id}`);
+  for (const ship of settings.ships) {
+    try { await removeQuiet(await root.getDirectoryHandle(safeName(ship.name)), BY); } catch { /* finnes ikke */ } // bare hvis tom
+  }
+
   const dirCache = new Map();
-  const groupDir = async (shipName, area, create) => {
-    const k = `${shipName}/${area}`;
+  const groupDir = async (shipName, area) => {
+    const k = lc(`${shipName}/${area}`);
+    if (existing.has(k)) return existing.get(k).dir;
     if (dirCache.has(k)) return dirCache.get(k);
-    const shipDir = await root.getDirectoryHandle(shipName, { create });
-    const by = await shipDir.getDirectoryHandle(BY, { create });
-    const d = await by.getDirectoryHandle(area, { create });
+    const shipDir = await root.getDirectoryHandle(shipName, { create: true });
+    const by = await shipDir.getDirectoryHandle(BY, { create: true });
+    const d = await by.getDirectoryHandle(area, { create: true });
     dirCache.set(k, d);
     return d;
   };
 
-  let changed = 0;
-  // Fjern kopier som er flyttet eller slettet
-  for (const [id, rec] of prev) {
-    const w = wanted.get(id);
-    if (w && w.ship === rec.ship && w.area === rec.area && w.name === rec.name) continue;
-    try {
-      const d = await groupDir(rec.ship, rec.area, false);
-      await removeQuiet(d, rec.name);
-      const shipDir = await root.getDirectoryHandle(rec.ship);
-      const by = await shipDir.getDirectoryHandle(BY);
-      await removeQuiet(by, rec.area); // bare hvis tom
-      await removeQuiet(shipDir, BY); // bare hvis tom
-      dirCache.delete(`${rec.ship}/${rec.area}`);
-    } catch { /* finnes ikke lenger */ }
-    if (!w) { await db.del('meta', `${prefix}${id}`); changed++; }
-  }
-  // Skriv nye / flyttede
+  // Skriv det som mangler (også om en annen PC har fjernet det); finnes fila allerede, er det nok å huske den
   let n = 0;
   for (const [id, w] of wanted) {
     const rec = prev.get(id);
-    if (rec && rec.ship === w.ship && rec.area === w.area && rec.name === w.name) continue;
+    const same = rec && rec.ship === w.ship && rec.area === w.area && rec.name === w.name;
+    const there = existing.get(lc(`${w.ship}/${w.area}`))?.names.has(lc(w.name));
+    if (there) {
+      if (!same) await db.put('meta', { key: `${prefix}${id}`, ...w });
+      continue;
+    }
     const p = await db.get('photos', id);
     if (!p) continue;
     if (++n % 10 === 0) h.onProgress?.(`Sorting photos ${BY.toLowerCase()} (${n}) …`);
-    await writeFile(await groupDir(w.ship, w.area, true), w.name, p.blob);
+    await writeFile(await groupDir(w.ship, w.area), w.name, p.blob);
     await db.put('meta', { key: `${prefix}${id}`, ...w });
     changed++;
   }

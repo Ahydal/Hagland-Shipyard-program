@@ -513,3 +513,6 @@ img.missing { background: repeating-linear-gradient(45deg, var(--surface-2), var
 .insp-item-name small { display: block; font-weight: 400; margin-top: 1px; }
 .insp-item .insp-badge { flex: none; }
 .insp-parties { margin: 4px 0 0; }
+
+.area-add { width: 100%; }
+.area-add[hidden] { display: none; }

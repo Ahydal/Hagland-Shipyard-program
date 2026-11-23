@@ -35,9 +35,12 @@ og en liste du kan filtrere på skip, resultat, punkt og fritekst. Klikk på en 
 
 **Sted, seksjon og utstyr:** under «Location on board» fyller du ut Section, Deck, «Room / tank» og **«Equipment / system»** (f.eks. Main engine, Hatch cover No. 2).
 Under Settings → **Lists** legger du inn faste lister per skip for tanker/rom, seksjoner og utstyr (én per linje), og velger med **«List»** når du registrerer.
-Listene deles mellom iPhone og PC.
+Listene deles mellom iPhone og PC. Nytt sted eller utstyr på runden: skriv det i søkefeltet i «List» og trykk **«Add …»**,
+eller skriv det rett i feltet – det legges inn i lista når du lagrer (gjelder lister som er i bruk).
 
-**Bilder i OneDrive og galleri:** hvert bilde lagres én gang, i `<skip>\By area\<tank/rom>\` (ellers dekk eller seksjon).
+**Bilder i OneDrive og galleri:** hvert bilde lagres én gang, i `<skip>\By area\<tank/rom>\` (ellers dekk, seksjon, utstyr eller spant).
+«No location» brukes bare når ingen av stedsfeltene er fylt ut. Ved hver synk rydder PC-en mappene: kopier som ligger feil
+(f.eks. fra før stedet ble lagt til, eller skrevet av en annen PC) fjernes, og bilder som mangler skrives på nytt. Egne filer du legger der, røres ikke.
 Dagsmappene (`<skip>\<dato>\`) har bare Word-dagboken «Daily log», med bildene inne i dokumentet.
 I «Photos» på PC kan du likevel gruppere på **Room / tank · Section · Equipment**, og bildene vises per uke.
 **«Rename»** gir en gruppe nytt navn: registreringene, lista og OneDrive-mappene oppdateres.
