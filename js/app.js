@@ -2,7 +2,7 @@ import * as db from './db.js';
 import * as summary from './summary.js';
 import * as sync from './sync.js';
 
-const APP_VERSION = '3.13.0';
+const APP_VERSION = '3.14.0';
 
 /* ------------------------------------------------------------------ */
 /* Konstanter                                                          */
@@ -394,6 +394,26 @@ const LISTS = {
   section: { title: 'Sections', ph: '120&#10;121&#10;215' },
   equipment: { title: 'Equipment and systems', ph: 'Main engine&#10;Hatch cover No. 1&#10;Rudder&#10;BWTS' },
 };
+/** Legger nye navn inn i de faste listene for et skip. Gir navnene som ble lagt til. */
+async function addToLists(shipId, values) {
+  const added = [];
+  const lists = { ...(state.settings.lists || {}) };
+  for (const [kind, raw] of Object.entries(values)) {
+    const v = String(raw || '').trim();
+    const dim = kind === 'room' ? 'area' : kind;
+    const list = listFor(kind, shipId);
+    if (!v || list.some((n) => sync.groupOf(dim, { [kind]: n }).key === sync.groupOf(dim, { [kind]: v }).key)) continue;
+    lists[kind] = { ...(lists[kind] || {}), [shipId]: [...list, v] };
+    added.push(v);
+  }
+  if (added.length) {
+    state.settings.lists = lists;
+    state.settings.listsUpdatedAt = Date.now();
+    await saveSettings();
+  }
+  return added;
+}
+
 /** Fast liste (room/section/equipment) for et skip (fra Settings). */
 const listFor = (kind, shipId) => state.settings.lists?.[kind]?.[shipId] || [];
 const areaList = (shipId) => listFor('room', shipId);
@@ -734,7 +754,7 @@ const VIEWS = {
         <nav class="card area-list" aria-label="Areas">
           <button class="area-item ${!sel ? 'on' : ''}" data-action="gallery-area" data-key="all">${icon('image')}<span>All photos</span><b>${total}</b></button>
           ${list.map((g) => `<button class="area-item ${sel?.key === g.key ? 'on' : ''}" data-action="gallery-area" data-key="${esc(g.key)}">${icon('folder')}<span>${esc(g.name)}</span><b>${g.items.length}</b></button>`).join('')}
-          <p class="muted small">${({ area: 'Grouped by “Room / tank”, then Deck, then Section.', section: 'Grouped by “Section”.', equipment: 'Grouped by “Equipment / system”.' })[dim]}
+          <p class="muted small">${({ area: 'Grouped by “Room / tank”, then Deck, Section, Equipment or Frame.', section: 'Grouped by “Section”.', equipment: 'Grouped by “Equipment / system”.' })[dim]}
             ${dim === 'area' ? `The same folders are in OneDrive under <b>${esc(sh.name)} → By area</b>. Each photo is stored there once; the day folders only hold the Daily log.` : 'This grouping is only in the app. In OneDrive the photos are stored once, under <b>By area</b>.'}</p>
         </nav>
         <div class="card">
@@ -1561,12 +1581,17 @@ async function saveEntry({ quiet = false } = {}) {
   const photos = d.photos.map((p) => ({ ...p, entryId: e.id, shipId: e.shipId, date: e.date }));
   await db.saveEntry(e, photos, d.removed);
   d.removed.forEach(forgetThumb);
+  // Nye rom/tanker, seksjoner og utstyr inn i den faste lista (bare lister som er i bruk)
+  const newNames = {};
+  for (const kind of Object.keys(LISTS)) if (listFor(kind, e.shipId).length && e.location?.[kind]) newNames[kind] = e.location[kind];
+  const addedToList = await addToLists(e.shipId, newNames);
   clearDraftLocal();
   state.draft = null;
   editorEl().close();
   if (state.view === 'day' && e.date !== state.date) state.date = e.date;
   const moved = !d.isNew && e.shipId !== d.origShipId;
   if (moved) toast(`Moved to ${state.settings.ships.find((s) => s.id === e.shipId)?.name || 'another vessel'}`);
+  else if (addedToList.length) toast(`Saved · added ${addedToList.map((x) => `“${x}”`).join(', ')} to the list`);
   else if (!quiet) toast('Saved');
   requestPersist();
   afterLocalChange();
@@ -1604,7 +1629,8 @@ function openAreaPicker(field = 'room') {
   dlg.innerHTML = `
     <div class="sheet area-sheet">
       <h2>${icon('list')} ${LISTS[field].title}</h2>
-      <input type="search" placeholder="Search" data-input="area-search" autocomplete="off">
+      <input type="search" placeholder="Search or type a new one" data-input="area-search" autocomplete="off">
+      <button type="button" class="btn primary area-add" data-action="add-area" data-field="${field}" hidden>${icon('plus')} <span></span></button>
       <div class="area-picks">${list.map((a) => `<button type="button" class="area-pick ${a === d.entry.location[field] ? 'on' : ''}" data-action="choose-area" data-field="${field}" data-area="${esc(a)}">${esc(a)}</button>`).join('')}</div>
       <button class="btn ghost" data-action="close-sheet">Cancel</button>
     </div>`;
@@ -1786,6 +1812,16 @@ const ACTIONS = {
     render();
   },
   'pick-area': (el) => openAreaPicker(el.dataset.field),
+  'add-area': async (el) => {
+    const field = el.dataset.field || 'room';
+    const v = $('[data-input=area-search]')?.value.trim();
+    if (!v || !state.draft) return;
+    await addToLists(state.draft.entry.shipId, { [field]: v });
+    $(`#f-${field}`).value = v;
+    $('#sheet').close();
+    saveDraftLocal();
+    toast(`Added “${v}” to the list`);
+  },
   'choose-area': (el) => {
     $(`#f-${el.dataset.field || 'room'}`).value = el.dataset.area;
     $('#sheet').close();
@@ -2083,6 +2119,12 @@ function bindEvents() {
     if (el.dataset.input === 'area-search') {
       const q = el.value.trim().toLowerCase().replace(/\s+/g, '');
       $$('.area-pick').forEach((b) => { b.hidden = q && !b.dataset.area.toLowerCase().replace(/\s+/g, '').includes(q); });
+      const add = $('.area-add');
+      if (add) {
+        const exact = $$('.area-pick').some((b) => b.dataset.area.toLowerCase().replace(/\s+/g, '') === q);
+        add.hidden = !q || exact;
+        add.querySelector('span').textContent = `Add “${el.value.trim()}”`;
+      }
     }
     if (el.dataset.input === 'week-query') { state.weekQuery = el.value; renderWeekFeed(); }
     if (el.dataset.input === 'insp-query') { state.inspQuery = el.value; renderInspFeed(); }
