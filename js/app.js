@@ -2,7 +2,7 @@ import * as db from './db.js';
 import * as summary from './summary.js';
 import * as sync from './sync.js';
 
-const APP_VERSION = '3.15.1';
+const APP_VERSION = '3.15.2';
 
 /* ------------------------------------------------------------------ */
 /* Konstanter                                                          */
@@ -1262,6 +1262,19 @@ function oneDriveCard(inSettings = false) {
   </div>`;
 }
 
+/** Viser at vi venter på nettleserens spørsmål/mappevelger, og et hint hvis det ikke kommer. Returnerer stopp-funksjon. */
+function waitHint() {
+  const s = state.sync;
+  s.error = 'Waiting for the browser …';
+  refreshSyncCard();
+  const t = setTimeout(() => {
+    s.error = 'No answer from the browser. Look for a question or a folder window that may be hidden behind this window (Alt+Tab), '
+      + 'or a key/folder icon at the top right of the window. Still nothing? Open the app in a normal Chrome or Edge tab instead of the installed app, and try again there.';
+    refreshSyncCard();
+  }, 6000);
+  return () => clearTimeout(t);
+}
+
 function refreshSyncCard() {
   const el = $('#oneDriveCard');
   if (el) el.outerHTML = oneDriveCard(el.dataset.settings === '1');
@@ -2048,17 +2061,22 @@ const ACTIONS = {
     render();
   },
   'pick-folder': async () => {
+    const stop = waitHint();
     try {
       state.sync.root = await sync.pickRoot();
       state.sync.perm = 'granted';
+      state.sync.error = '';
       refreshSyncCard();
       runSync();
     } catch (err) {
+      state.sync.error = '';
+      refreshSyncCard();
       if (err.name !== 'AbortError') alert(`Could not use the folder: ${err.message}`);
-    }
+    } finally { stop(); }
   },
   'connect-folder': async () => {
     const s = state.sync;
+    const stop = waitHint();
     try {
       s.perm = await sync.permission(s.root, true);
       s.error = s.perm === 'granted' ? '' : 'Access was not allowed. Click “Choose folder again” and pick the same folder, or allow file access for this site (padlock icon left of the address).';
@@ -2066,7 +2084,7 @@ const ACTIONS = {
       // Lagret mappe finnes ikke lenger (flyttet, eller OneDrive ikke synket på denne PC-en)
       s.perm = 'prompt';
       s.error = `The saved folder can't be opened on this PC (${err.message}). Click “Choose folder again”.`;
-    }
+    } finally { stop(); }
     refreshSyncCard();
     runSync();
   },
