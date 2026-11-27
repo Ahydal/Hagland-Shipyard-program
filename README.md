@@ -48,6 +48,10 @@ I «Photos» på PC kan du likevel gruppere på **Room / tank · Section · Equi
 **Sending som ikke kom fram:** endringer regnes ikke som levert før PC-en har bekreftet dem via «Get from PC». Til da blir de med i hver sending,
 så ingenting går tapt hvis en fil aldri kom fram til OneDrive. Tips: åpne OneDrive-appen et øyeblikk etter at du har sendt.
 
+**Tegninger (GA plan, tank plan …):** fanen **«Drawings»** på PC, og kart-knappen øverst på iPhone. Trykk **«Add drawing»** og velg PDF eller bilde
+(på iPhone: fra OneDrive i Filer). PDF-er gjøres om til bilder første gang (krever nett), og lagres på enheten – så de virker uten nett om bord.
+Knip for å zoome, dobbelttrykk for å zoome inn/ut, piler for neste side. Tegningene synkes ikke: legg dem inn på hver enhet.
+
 **Registrert på feil skip?** Åpne registreringen, velg riktig skip i **«Vessel»** og trykk **«Save»**.
 
 **På PC:** når appen er åpen, henter den inn sendingene automatisk (hvert 2. minutt). Bilder og Word-dagbok («Daily log») havner i
