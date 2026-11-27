@@ -2,7 +2,7 @@ import * as db from './db.js';
 import * as summary from './summary.js';
 import * as sync from './sync.js';
 
-const APP_VERSION = '3.15.2';
+const APP_VERSION = '3.15.3';
 
 /* ------------------------------------------------------------------ */
 /* Konstanter                                                          */
@@ -1268,8 +1268,9 @@ function waitHint() {
   s.error = 'Waiting for the browser …';
   refreshSyncCard();
   const t = setTimeout(() => {
-    s.error = 'No answer from the browser. Look for a question or a folder window that may be hidden behind this window (Alt+Tab), '
-      + 'or a key/folder icon at the top right of the window. Still nothing? Open the app in a normal Chrome or Edge tab instead of the installed app, and try again there.';
+    // En hengende forespørsel blokkerer også mappevelgeren til siden lastes på nytt
+    s.error = 'No answer from the browser. Close this window (or press F5), open the app in a normal Chrome or Edge tab, '
+      + 'and click “Choose folder again” first. Then pick the same folder.';
     refreshSyncCard();
   }, 6000);
   return () => clearTimeout(t);
