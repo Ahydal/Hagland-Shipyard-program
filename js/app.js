@@ -2,7 +2,7 @@ import * as db from './db.js';
 import * as summary from './summary.js';
 import * as sync from './sync.js';
 
-const APP_VERSION = '3.15.0';
+const APP_VERSION = '3.15.1';
 
 /* ------------------------------------------------------------------ */
 /* Konstanter                                                          */
@@ -1240,7 +1240,11 @@ function oneDriveCard(inSettings = false) {
   } else if (s.perm !== 'granted') {
     body = `<p>${icon('folder')} <b>${esc(s.root.name)}</b></p>
       <p class="muted">The browser needs you to confirm access to the folder.</p>
-      <button class="btn primary" data-action="connect-folder">${icon('folder')} Connect “${esc(s.root.name)}”</button>`;
+      ${s.error ? `<p class="error">${esc(s.error)}</p>` : ''}
+      <div class="row">
+        <button class="btn primary" data-action="connect-folder">${icon('folder')} Connect “${esc(s.root.name)}”</button>
+        <button class="btn ghost" data-action="pick-folder">Choose folder again</button>
+      </div>`;
   } else {
     body = `<p class="sync-line">${icon('folder')} <b>${esc(s.root.name)}</b> · ${s.running ? esc(s.msg || 'Syncing …') : `synced ${fmtWhen(s.lastAt)}`}</p>
       ${s.error ? `<p class="error">${esc(s.error)}</p>` : ''}
@@ -1271,6 +1275,7 @@ async function iphoneOneDriveCard() {
   const fromPc = await db.get('meta', 'lastFromPc');
   return `<div class="card">
     <h2>${icon('cloud')} OneDrive</h2>
+    ${matchMedia('(pointer: fine)').matches ? '<p class="warn">⚠️ This browser cannot open folders, so the PC can\'t connect to the OneDrive folder. On a PC, open the app in <b>Microsoft Edge</b> or <b>Google Chrome</b>.</p>' : ''}
     <p>${pending ? `<b>${pending}</b> ${pending === 1 ? 'change has' : 'changes have'} not been sent.` : '✅ Everything has been sent.'} <span class="muted">Last sent ${fmtWhen(last)}.</span></p>
     ${unconfirmed ? `<p class="muted small">${unconfirmed} sent ${unconfirmed === 1 ? 'change is' : 'changes are'} not yet confirmed by the PC. ${unconfirmed === 1 ? 'It is' : 'They are'} included again in the next send, so nothing is lost if a file never arrived. “Get changes from PC” confirms them.</p>` : ''}
     <button class="btn primary" data-action="send-onedrive" ${pending || unconfirmed ? '' : 'disabled'}>${icon('cloud')} Send to OneDrive</button>
@@ -2053,7 +2058,15 @@ const ACTIONS = {
     }
   },
   'connect-folder': async () => {
-    state.sync.perm = await sync.permission(state.sync.root, true);
+    const s = state.sync;
+    try {
+      s.perm = await sync.permission(s.root, true);
+      s.error = s.perm === 'granted' ? '' : 'Access was not allowed. Click “Choose folder again” and pick the same folder, or allow file access for this site (padlock icon left of the address).';
+    } catch (err) {
+      // Lagret mappe finnes ikke lenger (flyttet, eller OneDrive ikke synket på denne PC-en)
+      s.perm = 'prompt';
+      s.error = `The saved folder can't be opened on this PC (${err.message}). Click “Choose folder again”.`;
+    }
     refreshSyncCard();
     runSync();
   },
