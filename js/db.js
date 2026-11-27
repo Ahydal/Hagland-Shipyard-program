@@ -1,6 +1,6 @@
 // Enkel IndexedDB-innpakning. All data lagres lokalt på enheten.
 const DB_NAME = 'tilsynsdagbok';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 let dbPromise;
 
 export function open() {
@@ -20,8 +20,10 @@ export function open() {
           p.createIndex('entryId', 'entryId');
           p.createIndex('shipId', 'shipId');
         }
+        if (!d.objectStoreNames.contains('drawings')) d.createObjectStore('drawings', { keyPath: 'id' }).createIndex('shipId', 'shipId');
       };
-      r.onsuccess = () => resolve(r.result);
+      r.onblocked = () => alert('Close other open Site Diary windows/tabs to finish the update.');
+      r.onsuccess = () => { r.result.onversionchange = () => r.result.close(); resolve(r.result); };
       r.onerror = () => reject(r.error);
     });
   }

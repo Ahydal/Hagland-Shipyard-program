@@ -2,7 +2,7 @@ import * as db from './db.js';
 import * as summary from './summary.js';
 import * as sync from './sync.js';
 
-const APP_VERSION = '3.14.0';
+const APP_VERSION = '3.15.0';
 
 /* ------------------------------------------------------------------ */
 /* Konstanter                                                          */
@@ -56,6 +56,7 @@ const ICON_PATHS = {
   users: '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
   report: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>',
   minus: '<line x1="5" y1="12" x2="19" y2="12"/>',
+  map: '<polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/>',
   plus: '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>',
   list: '<line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>',
   check: '<polyline points="20 6 9 17 4 12"/>',
@@ -301,12 +302,13 @@ function renderTopbar() {
       <button class="${state.view === 'dayreport' ? 'on' : ''}" data-action="nav" data-view="dayreport">${icon('report')} Daily report</button>
       <button class="${state.view === 'photos' ? 'on' : ''}" data-action="nav" data-view="photos">${icon('image')} Photos</button>
       <button class="${state.view === 'inspections' ? 'on' : ''}" data-action="nav" data-view="inspections">${icon('check')} Inspections</button>
+      <button class="${state.view === 'drawings' ? 'on' : ''}" data-action="nav" data-view="drawings">${icon('map')} Drawings</button>
     </nav>`;
   const gear = `<button class="icon-btn" data-action="nav" data-view="settings" aria-label="Settings">${icon('gear')}</button>`;
-  if (['week', 'dayreport', 'photos', 'inspections'].includes(state.view)) {
+  if (['week', 'dayreport', 'photos', 'inspections', 'drawings'].includes(state.view)) {
     $('#topbar').innerHTML = `
       <button class="icon-btn mobile-only" data-action="nav" data-view="day" aria-label="Back">${icon('left')}</button>
-      <h1 class="topbar-title mobile-only">${({ week: 'Weekly report', dayreport: 'Daily report', photos: 'Photos', inspections: 'Inspections' })[state.view]}</h1>
+      <h1 class="topbar-title mobile-only">${({ week: 'Weekly report', dayreport: 'Daily report', photos: 'Photos', inspections: 'Inspections', drawings: 'Drawings' })[state.view]}</h1>
       ${tabs}
       <span class="spacer"></span>
       ${gear}`;
@@ -324,6 +326,7 @@ function renderTopbar() {
     <button class="icon-btn mobile-only" data-action="nav" data-view="week" aria-label="Weekly report">${icon('calendar')}</button>
     ${tabs}
     ${sel}
+    <button class="icon-btn mobile-only" data-action="nav" data-view="drawings" aria-label="Drawings">${icon('map')}</button>
     ${gear}`;
 }
 
@@ -335,7 +338,7 @@ async function render() {
   const html = await VIEWS[state.view]();
   if (token !== renderToken) return;
   const main = $('#main');
-  main.classList.toggle('wide', ['week', 'dayreport', 'photos', 'inspections'].includes(state.view));
+  main.classList.toggle('wide', ['week', 'dayreport', 'photos', 'inspections', 'drawings'].includes(state.view));
   main.classList.toggle('xwide', state.view === 'week');
   main.innerHTML = html;
   hydrateThumbs(main);
@@ -718,6 +721,32 @@ const VIEWS = {
           </div>
           <div id="inspFeed"></div>
         </div>
+      </div>
+    </section>`;
+  },
+
+  async drawings() {
+    const sh = state.settings.ships.find((x) => x.id === state.drawShip) || ship();
+    const list = (await db.getAllBy('drawings', 'shipId', sh.id)).sort((a, b) => a.name.localeCompare(b.name, 'en', { numeric: true }));
+    const mb = (d) => (d.pages.reduce((n, b) => n + b.size, 0) / 1048576).toFixed(1);
+    return `
+    <section class="view">
+      <div class="gallery-top">
+        <div class="chips">${state.settings.ships.map((x) => `<button class="chip-f ${x.id === sh.id ? 'on' : ''}" data-action="draw-ship" data-ship="${x.id}">${esc(x.name)}</button>`).join('')}</div>
+        <label class="btn primary">${icon('plus')} Add drawing<input type="file" accept="application/pdf,.pdf,image/*" multiple data-change="add-drawing" data-ship="${sh.id}" hidden></label>
+      </div>
+      <div class="card">
+        <h2>${icon('map')} Drawings · ${esc(sh.name)}</h2>
+        ${list.length ? `<div class="draw-list">${list.map((d) => `
+          <div class="draw-item">
+            <button class="draw-open" data-action="open-drawing" data-id="${d.id}">${icon('map')}<span><b>${esc(d.name)}</b>
+              <small class="muted">${d.pages.length} ${d.pages.length === 1 ? 'page' : 'pages'} · ${mb(d)} MB</small></span></button>
+            <button class="icon-btn" data-action="rename-drawing" data-id="${d.id}" aria-label="Rename">${icon('pen')}</button>
+            <button class="icon-btn" data-action="delete-drawing" data-id="${d.id}" aria-label="Delete">${icon('trash')}</button>
+          </div>`).join('')}</div>`
+          : '<p class="muted">No drawings yet. Add the GA plan, tank plan etc. as PDF or image.</p>'}
+        <p class="muted small">Drawings are stored on this device, so they work offline on board. They are not synced:
+          add them on each device (on iPhone: pick the file from OneDrive in Files). Pinch or use the buttons to zoom.</p>
       </div>
     </section>`;
   },
@@ -1641,6 +1670,120 @@ function openAreaPicker(field = 'room') {
 /* Bildeviser                                                          */
 /* ------------------------------------------------------------------ */
 
+/* ---------- Tegninger (GA plan, tank plan …) ---------- */
+const PDFJS_URL = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/legacy/build/pdf.min.mjs';
+const PDFJS_WORKER = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/legacy/build/pdf.worker.min.mjs';
+// iOS tåler ikke canvas over ca. 16,7 mill. piksler
+const MAX_PIXELS = 16e6;
+
+/** Gjør PDF-sidene om til JPEG-bilder én gang, så visningen virker uten nett. */
+async function pdfToImages(file, onPage) {
+  const pdfjs = await import(PDFJS_URL);
+  pdfjs.GlobalWorkerOptions.workerSrc = PDFJS_WORKER;
+  const pdf = await pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
+  const pages = [];
+  for (let i = 1; i <= pdf.numPages; i++) {
+    onPage?.(i, pdf.numPages);
+    const page = await pdf.getPage(i);
+    const v1 = page.getViewport({ scale: 1 });
+    const vp = page.getViewport({ scale: Math.min(6, Math.sqrt(MAX_PIXELS / (v1.width * v1.height))) });
+    const c = document.createElement('canvas');
+    c.width = Math.floor(vp.width);
+    c.height = Math.floor(vp.height);
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, c.width, c.height);
+    await page.render({ canvasContext: ctx, viewport: vp }).promise;
+    pages.push(await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.85)));
+    c.width = 0; // frigjør minnet (iOS)
+    page.cleanup();
+  }
+  await pdf.destroy();
+  return pages;
+}
+
+async function addDrawings(files, shipId) {
+  let n = 0;
+  for (const f of files) {
+    try {
+      const isPdf = f.type === 'application/pdf' || /\.pdf$/i.test(f.name);
+      const pages = isPdf ? await pdfToImages(f, (i, tot) => toast(`Preparing ${f.name}: page ${i} of ${tot} …`)) : [f];
+      await db.put('drawings', { id: uid(), shipId, name: f.name.replace(/\.[^.]+$/, ''), pages, createdAt: Date.now() });
+      n++;
+    } catch (err) {
+      console.error(err);
+      alert(`Could not read “${f.name}”${navigator.onLine ? '' : ' (PDFs need internet the first time)'}: ${err.message || err}`);
+    }
+  }
+  if (n) { toast(`${n} ${n === 1 ? 'drawing' : 'drawings'} added`); requestPersist(); }
+  render();
+}
+
+/** Visning med zoom: knip (iPhone), scrollhjul og dra (PC), knapper og dobbelttrykk. */
+async function openDrawing(id, page = 0) {
+  const d = await db.get('drawings', id);
+  if (!d) return;
+  state.lightbox = null;
+  state.drawing = { id, page };
+  if (lightboxUrl) URL.revokeObjectURL(lightboxUrl);
+  lightboxUrl = URL.createObjectURL(d.pages[page]);
+  const dlg = $('#lightbox');
+  dlg.innerHTML = `
+    <div class="dv">
+      <div class="dv-scroll"><img class="dv-img" src="${lightboxUrl}" alt="${esc(d.name)}" draggable="false"></div>
+      <div class="lb-bar">
+        <button class="icon-btn" data-action="draw-page" data-step="-1" ${page === 0 ? 'disabled' : ''} aria-label="Previous page">${icon('left')}</button>
+        <div class="lb-cap">${esc(d.name)}<small>${d.pages.length > 1 ? `Page ${page + 1} / ${d.pages.length}` : ''}</small></div>
+        <button class="icon-btn" data-action="draw-zoom" data-z="0.5" aria-label="Zoom out">${icon('minus')}</button>
+        <button class="icon-btn" data-action="draw-zoom" data-z="0" aria-label="Fit">${icon('image')}</button>
+        <button class="icon-btn" data-action="draw-zoom" data-z="2" aria-label="Zoom in">${icon('plus')}</button>
+        <button class="icon-btn" data-action="draw-page" data-step="1" ${page >= d.pages.length - 1 ? 'disabled' : ''} aria-label="Next page">${icon('right')}</button>
+        <button class="icon-btn" data-action="lb-close" aria-label="Close">${icon('x')}</button>
+      </div>
+    </div>`;
+  if (!dlg.open) dlg.showModal();
+  initZoom(dlg.querySelector('.dv-scroll'), dlg.querySelector('.dv-img'));
+}
+
+function initZoom(box, img) {
+  let z = 1; // 1 = hele tegningen synlig
+  const fitW = () => Math.min(box.clientWidth, box.clientHeight * (img.naturalWidth / img.naturalHeight));
+  const maxZ = () => Math.max(1, (img.naturalWidth * 1.5) / fitW());
+  // Zoom rundt et punkt (cx, cy) i boksen, så det man ser på blir liggende under fingeren
+  const set = (nz, cx = box.clientWidth / 2, cy = box.clientHeight / 2) => {
+    const r = img.getBoundingClientRect();
+    const b = box.getBoundingClientRect();
+    const fx = (cx + b.left - r.left) / r.width;
+    const fy = (cy + b.top - r.top) / r.height;
+    z = Math.min(maxZ(), Math.max(1, nz));
+    img.style.width = `${fitW() * z}px`;
+    box.scrollLeft = fx * img.offsetWidth - cx + img.offsetLeft;
+    box.scrollTop = fy * img.offsetHeight - cy + img.offsetTop;
+  };
+  const fit = () => set(1);
+  if (img.complete && img.naturalWidth) fit(); else img.onload = fit;
+  box.zoomBy = (f) => set(f ? z * f : 1);
+  const pt = (ev) => { const b = box.getBoundingClientRect(); return [ev.clientX - b.left, ev.clientY - b.top]; };
+
+  let pinch = null;
+  const dist = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+  const mid = (t) => pt({ clientX: (t[0].clientX + t[1].clientX) / 2, clientY: (t[0].clientY + t[1].clientY) / 2 });
+  box.addEventListener('touchstart', (ev) => { if (ev.touches.length === 2) pinch = { d: dist(ev.touches), z }; }, { passive: true });
+  box.addEventListener('touchmove', (ev) => {
+    if (ev.touches.length !== 2 || !pinch) return;
+    ev.preventDefault();
+    set(pinch.z * (dist(ev.touches) / pinch.d), ...mid(ev.touches));
+  }, { passive: false });
+  box.addEventListener('touchend', (ev) => { if (ev.touches.length < 2) pinch = null; });
+  box.addEventListener('gesturestart', (ev) => ev.preventDefault()); // ikke la Safari zoome hele siden
+  box.addEventListener('dblclick', (ev) => set(z > 1.5 ? 1 : z * 3, ...pt(ev)));
+  box.addEventListener('wheel', (ev) => { ev.preventDefault(); set(z * Math.exp(-ev.deltaY / 300), ...pt(ev)); }, { passive: false });
+  let drag = null;
+  box.addEventListener('pointerdown', (ev) => { if (ev.pointerType === 'mouse') { drag = { x: ev.clientX, y: ev.clientY, l: box.scrollLeft, t: box.scrollTop }; box.setPointerCapture(ev.pointerId); } });
+  box.addEventListener('pointermove', (ev) => { if (drag) { box.scrollLeft = drag.l - (ev.clientX - drag.x); box.scrollTop = drag.t - (ev.clientY - drag.y); } });
+  box.addEventListener('pointerup', () => { drag = null; });
+}
+
 let lightboxUrl = null;
 async function openLightbox(ids, index) {
   state.lightbox = { ids, index };
@@ -1677,6 +1820,7 @@ function closeLightbox() {
   if (lightboxUrl) URL.revokeObjectURL(lightboxUrl);
   lightboxUrl = null;
   state.lightbox = null;
+  state.drawing = null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1771,6 +1915,27 @@ const ACTIONS = {
   'send-onedrive': () => prepareSend(),
   'edit-crew': (el) => openCrewSheet(el.dataset.ship),
   'report-ship': (el) => { state.reportShip = el.dataset.ship; render(); },
+  'draw-ship': (el) => { state.drawShip = el.dataset.ship; render(); },
+  'open-drawing': (el) => openDrawing(el.dataset.id),
+  'draw-page': async (el) => {
+    const d = await db.get('drawings', state.drawing.id);
+    const page = Math.max(0, Math.min(d.pages.length - 1, state.drawing.page + Number(el.dataset.step)));
+    if (page !== state.drawing.page) openDrawing(d.id, page);
+  },
+  'draw-zoom': (el) => $('#lightbox .dv-scroll')?.zoomBy(Number(el.dataset.z)),
+  'rename-drawing': async (el) => {
+    const d = await db.get('drawings', el.dataset.id);
+    const name = prompt('Name', d.name)?.trim();
+    if (!name || name === d.name) return;
+    await db.put('drawings', { ...d, name });
+    render();
+  },
+  'delete-drawing': async (el) => {
+    const d = await db.get('drawings', el.dataset.id);
+    if (!confirm(`Delete “${d.name}” from this device?`)) return;
+    await db.del('drawings', d.id);
+    render();
+  },
   'gallery-ship': (el) => { state.galleryShip = el.dataset.ship; state.galleryArea = 'all'; render(); },
   'gallery-area': (el) => { state.galleryArea = el.dataset.key; render(); },
   'insp-ship': (el) => { state.inspShip = el.dataset.ship; state.inspItem = null; render(); },
@@ -2040,6 +2205,7 @@ const CHANGES = {
   'add-photos': async (el) => { const files = [...el.files]; el.value = ''; await addFilesToDraft(files); },
   stamp: async (el) => { state.settings.stampPhotos = el.checked; await saveSettings(); toast('Saved'); },
   import: async (el) => { const f = el.files[0]; el.value = ''; if (f) await importBackup(f); },
+  'add-drawing': async (el) => { const files = [...el.files]; el.value = ''; if (files.length) await addDrawings(files, el.dataset.ship); },
   'import-pc': async (el) => {
     const f = el.files[0];
     el.value = '';
@@ -2069,7 +2235,7 @@ function bindEvents() {
   document.addEventListener('keydown', (ev) => {
     if (ev.key === 'Enter' && ev.target.closest('[data-todo-form]')) { ev.preventDefault(); addTodo(); return; }
     if (ev.key === 'Enter' && ev.target.matches('article.entry')) ACTIONS.edit(ev.target);
-    if ($('#lightbox').open) {
+    if ($('#lightbox').open && state.lightbox) {
       if (ev.key === 'ArrowLeft') ACTIONS['lb-step']({ dataset: { step: -1 } });
       if (ev.key === 'ArrowRight') ACTIONS['lb-step']({ dataset: { step: 1 } });
     }

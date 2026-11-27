@@ -516,3 +516,15 @@ img.missing { background: repeating-linear-gradient(45deg, var(--surface-2), var
 
 .area-add { width: 100%; }
 .area-add[hidden] { display: none; }
+
+/* ---------- Drawings ---------- */
+.draw-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
+.draw-item { display: flex; align-items: center; gap: 4px; border-bottom: 1px solid var(--line); padding: 2px 0; }
+.draw-open { flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; padding: 12px 8px; border: 0; background: transparent; cursor: pointer; text-align: left; color: inherit; border-radius: 10px; }
+.draw-open:hover { background: var(--surface-2); }
+.draw-open span { min-width: 0; display: flex; flex-direction: column; }
+.draw-open b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.draw-open .ico { width: 26px; height: 26px; flex: none; color: var(--navy-2); }
+.dv { width: 100%; height: 100%; display: flex; flex-direction: column; }
+.dv-scroll { position: relative; flex: 1; min-height: 0; overflow: auto; display: flex; touch-action: pan-x pan-y; -webkit-overflow-scrolling: touch; cursor: grab; background: #fff; }
+.dv-img { flex: none; margin: auto; max-width: none; user-select: none; -webkit-user-select: none; }
